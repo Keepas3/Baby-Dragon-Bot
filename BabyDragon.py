@@ -21,9 +21,15 @@ intents.presences = True
 
 bot = commands.Bot(command_prefix = "!", intents= intents)
 
+
 def format_datetime(dt_str):
-    dt = datetime.strptime(dt_str,'%Y%m%dT%H%M%S.%fZ')
-    return dt.strftime('%Y-%m-%d %H:%M:%S')
+    if not dt_str:
+        return "N/A"
+    try: 
+        dt = datetime.strptime(dt_str,'%Y%m%dT%H%M%S.%fZ')
+        return dt.strftime('%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return "N/A"
 
 @bot.event
 async def on_ready():
@@ -50,7 +56,33 @@ async def flip(interaction: discord.Interaction):
     elif integer1 == 2:
         await interaction.response.send_message("The coin flips to... Tails!!!")
 
+def check_coc_clan_tag(clan_tag): 
+  #  api_key = 'YOUR_API_KEY'
+    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}' 
+    headers = { 'Authorization': f'Bearer {api_key}', 'Accept': 'application/json' } 
+    response = requests.get(url, headers=headers) 
+    if response.status_code == 200: 
+        return True # Valid clan tag 
+    elif response.status_code == 404: 
+        return False
 
+@bot.tree.command(name = 'setclantag')
+@app_commands.checks.has_any_role("Admin", "Co-Leaders", "Elders")
+async def set_clan_tag(interaction: discord.Interaction, new_tag: str):
+    if check_coc_clan_tag(new_tag.replace('#', '%23')):
+        global clan_tag
+        clan_tag = new_tag.replace('#', '%23')
+        await interaction.response.send_message(f'Clan tag has been updated to {new_tag}')
+    else:
+        await interaction.response.send_message(f"Not a valid Clan ID") 
+
+@set_clan_tag.error 
+async def set_clan_tag_error(interaction: discord.Interaction, error): 
+    if isinstance(error, app_commands.MissingRole): 
+        await interaction.response.send_message("You don't have permission to use this command.") 
+    else:
+        await interaction.response.send_message(f"An error occurred: {error}")                  
+          
 
 @bot.tree.command(name ="goldpass", description= "Information about start/end of current gold pass")
 async def goldpass(interaction: discord.Interaction):
@@ -495,6 +527,193 @@ async def previous_raids(interaction: discord.Interaction):
     else:
         await interaction.followup.send(f"Error retrieving capital raid seasons: {response.status_code}, {response.text}")
     
+
+@bot.tree.command(name="warlog", description="Retrieve the war log for the specified clan")
+@app_commands.describe(limit = "The number of wars to retrieve (default 1, max 5)" )
+async def warLog(interaction: discord.Interaction, limit: int=1):
+    await interaction.response.defer()  # Defer the interaction to allow time for processing
+    if not api_key:
+        raise ValueError("API KEY NOT FOUND")
+    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}/warlog'
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Accept': 'application/json'
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        war_log = response.json()
+        war_entries = war_log.get('items', [])
+        
+        end_time = war_log.get('endTime')
+        end_date = format_datetime(end_time)
+     #   end_time = format_datetime(war_log.get('endTime', ''))
+        if not war_entries:
+            await interaction.followup.send("No war log entries found for the specified clan.")
+            return
+
+        limit = max(1,min(limit, 5))
+        war_entries = war_entries[:limit]
+
+        war_info_list = [
+            (
+                f'```yaml\n'
+                f"**War#{i + 1}**\n"
+                f"Result: {entry['result']}\n"
+                f"Team Size: {entry['teamSize']}\n"
+                f"Opponent: {entry['opponent']['name']} (Tag: {entry['opponent']['tag']})\n"
+                f"Clan Stars: {entry['clan']['stars']}, Clan Destruction: {entry['clan']['destructionPercentage']}%\n"
+                f"Opponent Stars: {entry['opponent']['stars']}, Opponent Destruction: {entry['opponent']['destructionPercentage']}%\n"
+                f"Exp Gained: {entry['clan']['expEarned']}, Clan Level: {entry['clan'].get('clanLevel', 'N/A')}\n"
+                f"End Date: {format_datetime(entry.get('endTime', 'N/A'))}\n" # Correctly retrieve and format endTime for each entry
+                f"```\n"
+            )
+            for i, entry in enumerate(war_entries)
+        ]
+
+        war_info_message = "\n".join(war_info_list)
+        
+        await interaction.followup.send(war_info_message)
+    elif response.status_code == 404:
+        await interaction.followup.send("No war log found for the specified clan.")
+    else:
+        await interaction.followup.send(f"Error retrieving war log: {response.status_code}, {response.text}")
+
+
+
+
+@bot.tree.command(name = "currentwar", description = "Recieve information about current war")
+async def warInfo(interaction:discord.Interaction):
+    await interaction.response.defer() # Defer the interaction to allow time for processing 
+    
+    if not api_key:
+        raise ValueError("API KEY NOT FOUND")
+    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}/currentwar' 
+    headers = { 'Authorization': f'Bearer {api_key}', 
+    'Accept': 'application/json' 
+    } 
+    response = requests.get(url, headers=headers) 
+    print(f"Response status: {response.status_code}, Response text: {response.text}") # Debugging print statement
+    if response.status_code == 200: 
+        war_data = response.json() 
+
+        if war_data['state'] == 'inWar':
+            war_info = (
+                f'```yaml\n'
+                f"**Current War Information**\n"
+                f"State: {war_data['state']}\n"
+                f"Team Size: {war_data['teamSize']}\n" 
+                f"Clan: {war_data['clan']['name']} (Tag: {war_data['clan']['tag']})\n" 
+                f"Opponent: {war_data['opponent']['name']} (Tag: {war_data['opponent']['tag']})\n" 
+                f"Clan Stars: {war_data['clan']['stars']}\n" 
+                f"Opponent Stars: {war_data['opponent']['stars']}\n" 
+                f"Clan Destruction Percentage: {war_data['clan']['destructionPercentage']}\n" 
+                f"Opponent Destruction Percentage: {war_data['opponent']['destructionPercentage']}\n"
+                f"```\n"
+
+        )
+        if war_data['state'] == 'notInWar':
+            war_info = (
+                f"```yaml\n"
+                f"**Current War Information**\n"
+                f"State: {war_data['state']}\n"
+                f"```\n"
+            )
+
+        await interaction.followup.send(war_info)
+    elif response.status_code == 404: 
+        await interaction.followup.send("No current war found for the specified clan.")
+    else:
+        await interaction.followup.send(f"Error retrieving current war info: {response.status_code}, {response.text}")
+
+@bot.tree.command(name = "cwlcurrent", description = "Recieve information about current war")
+async def warInfo(interaction:discord.Interaction):
+    await interaction.response.defer() # Defer the interaction to allow time for processing 
+    if not api_key:
+        raise ValueError("API KEY NOT FOUND")
+    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}/currentwar/leaguegroup' 
+    headers = { 'Authorization': f'Bearer {api_key}', 
+    'Accept': 'application/json' 
+    } 
+    response = requests.get(url, headers=headers) 
+  #  print(f"Response status: {response.status_code}, Response text: {response.text}") # Debugging print statement
+    if response.status_code == 200: 
+        war_data = response.json() 
+
+        if 'state' in war_data and war_data['state'] == 'inWar': 
+            if 'clans' in war_data: 
+                clan_info = "\n".join([ f"Clan{i+1}: {clan['name']} (Tag: {clan['tag']})" 
+                for i, clan in enumerate(war_data['clans'])
+                ])
+                war_info = ( 
+                f'```yaml\n' 
+                f"**Current CWL Information**\n" 
+                f"State: {war_data['state']}\n" 
+                f"Season: {war_data['season']}\n" 
+                f"{clan_info}\n" 
+                f"```\n"
+            )
+             
+            else: 
+                war_info = ( 
+                f'```yaml\n' f"**Current War Information**\n" 
+                f"State: {war_data['state']}\n" 
+                f"No clans data available.\n" f"```\n" 
+                ) 
+
+        elif 'state' in war_data and war_data['state'] == 'notInWar': 
+            war_info = ( f'```yaml\n' 
+            f"**Current War Information**\n" 
+            f"State: {war_data['state']}\n" 
+            f"```\n"
+
+            )
+            
+        await interaction.followup.send(war_info)
+    elif response.status_code == 404: 
+        await interaction.followup.send("No current war found for the specified clan.")
+    else:
+        await interaction.followup.send(f"Error retrieving current war info: {response.status_code}, {response.text}")
+
+@bot.tree.command(name = "cwlclansearch", description = "Search up other clans in CWL")
+@app_commands.describe(clanname = "The clan's name")
+async def CWL_clan_search(interaction: discord.Interaction, clanname: str):
+    await interaction.response.defer()
+    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}/currentwar/leaguegroup'
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Accept': 'application/json'
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        war_data = response.json()
+        clan_found = False
+
+        for clan in war_data.get('clans', []):
+            if clan['name'].lower() == clanname.lower():
+                clan_found = True
+                sorted_members = sorted(clan['members'], key=lambda member: member['townHallLevel'], reverse=True)
+                member_info = "\n".join([
+                    f"Member{i+1}: {member['name']} (TH Level: {member['townHallLevel']})"
+                   # for member in clan['members']
+                    for i, member in enumerate(sorted_members)
+                ])
+                war_info = (
+                    f'```yaml\n'
+                    f"**CWL Clan Search Result**\n"
+                    f"Clan: {clan['name']} (Tag: {clan['tag']})\n"
+                    f"Members:\n{member_info}\n"
+                    f"```\n"
+                )
+                await interaction.followup.send(war_info)
+                break
+        
+        if not clan_found:
+            await interaction.followup.send(f"Clan '{clanname}' not found in the current CWL.")
+    else:
+        await interaction.followup.send(f"Error retrieving CWL information: {response.status_code}, {response.text}")
+
+
+
 
 bot.run(TOKEN)
 
