@@ -268,6 +268,32 @@ async def player_spells(interaction: discord.Interaction, player_tag: str):
     else:
         await interaction.response.send_message(f'Error: {response.status_code}, {response.text}')
 
+ #Lists all clan members in clan 
+@bot.tree.command(name="clanmembers", description="Get all member info of the clan") 
+async def clan_members(interaction: discord.Interaction): 
+    await interaction.response.defer() # Defer the interaction to allow time for processing
+    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}'
+    headers = { 'Authorization': f'Bearer {api_key}', 
+    'Accept': 'application/json' 
+    }
+    response = requests.get(url, headers=headers) 
+    if response.status_code == 200: 
+        clan_data = response.json() 
+        member_list = "```yaml\n** Member Information: ** \n" 
+        for member in clan_data['memberList']:
+            role = member['role']
+            if role in ['coLeader', 'leader', 'elder']:
+                role = role.upper()
+            member_list += ( 
+            f"{member['clanRank']}. {member['name']}, Role: {role}\n" 
+
+            ) 
+        member_list += "```"
+        await interaction.followup.send(member_list)
+    else: 
+        await interaction.response.send_message(f'Error: {response.status_code}, {response.text}')   
+              
+
 @bot.tree.command(name ="lookupclans", description = "search for clans")
 @app_commands.describe(clanname = "The clan's name", war_frequency = "Filter by war frequency (always)", min_members = "Filter by minimum num. of members", 
 max_members = "Filter by maximum num. of members", minclan_level = "Filter by clan Level", limits="Number of clans to return (default 1, max 3)")
