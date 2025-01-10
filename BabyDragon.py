@@ -67,7 +67,7 @@ def check_coc_clan_tag(clan_tag):
         return False
 
 @bot.tree.command(name = 'setclantag')
-@app_commands.checks.has_any_role("Admin", "Co-Leaders", "Elders")
+#@app_commands.checks.has_any_role("Admin", "Co-Leaders", "Elders")
 async def set_clan_tag(interaction: discord.Interaction, new_tag: str):
     if check_coc_clan_tag(new_tag.replace('#', '%23')):
         global clan_tag
@@ -83,6 +83,14 @@ async def set_clan_tag_error(interaction: discord.Interaction, error):
     else:
         await interaction.response.send_message(f"An error occurred: {error}")                  
           
+@bot.tree.command(name = "clean", description ='Clean messages from the bot')
+async def clean(interaction : discord.Interaction, limit: int =2):
+    await interaction.response.defer()
+    if limit < 2 or limit >10:
+        limit = 2
+    deleted = await interaction.channel.purge(limit =limit)
+    await interaction.followup.send(f"Deleted {len(deleted)} messages")
+
 
 @bot.tree.command(name ="goldpass", description= "Information about start/end of current gold pass")
 async def goldpass(interaction: discord.Interaction):
