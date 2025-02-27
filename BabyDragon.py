@@ -83,13 +83,13 @@ async def set_clan_tag_error(interaction: discord.Interaction, error):
     else:
         await interaction.response.send_message(f"An error occurred: {error}")                  
           
-@bot.tree.command(name = "clean", description ='Clean messages from the bot')
-async def clean(interaction : discord.Interaction, limit: int =2):
-    await interaction.response.defer()
-    if limit < 2 or limit >10:
-        limit = 2
-    deleted = await interaction.channel.purge(limit =limit)
-    await interaction.followup.send(f"Deleted {len(deleted)} messages")
+# @bot.tree.command(name = "clean", description ='Clean messages from the bot')
+# async def clean(interaction : discord.Interaction, limit: int =2):
+#     await interaction.response.defer()
+#     if limit < 2 or limit >10:
+#         limit = 2
+#     deleted = await interaction.channel.purge(limit =limit)
+#     await interaction.followup.send(f"Deleted {len(deleted)} messages")
 
 
 @bot.tree.command(name ="goldpass", description= "Information about start/end of current gold pass")
@@ -287,13 +287,15 @@ async def clan_members(interaction: discord.Interaction):
     response = requests.get(url, headers=headers) 
     if response.status_code == 200: 
         clan_data = response.json() 
-        member_list = "```yaml\n** Member Information: ** \n" 
+        member_list = "```yaml\n**  Members Ranked by Trophies: ** \n" 
         for member in clan_data['memberList']:
             role = member['role']
-            if role in ['coLeader', 'leader', 'elder']:
+            if role in ['coLeader', 'leader', 'admin']:
+                if role =='admin':
+                    role = 'elder'
                 role = role.upper()
             member_list += ( 
-            f"{member['clanRank']}. {member['name']}, Role: {role}\n" 
+            f"{member['clanRank']}. {member['name']}, Role: {role}, TH: {member['townHallLevel']}\n" 
 
             ) 
         member_list += "```"
@@ -409,7 +411,7 @@ async def clanInfo(interaction: discord.Interaction):
   #  print(f"Response status: {response.status_code}, Response text: {response.text}")  # Debugging print statement
     if response.status_code == 200:
         clan_data = response.json()
-        
+        averageTHLVL+= {clan_data['townHallLevel']} #IMPLEMENT THIS
         clan_info = (
             f"**Clan Information**\n"
             f"```yaml\n"
@@ -631,17 +633,22 @@ async def warInfo(interaction:discord.Interaction):
         war_data = response.json() 
 
         if war_data['state'] == 'inWar':
+            start_time = format_datetime(war_data.get('startTime', 'N/A'))
+            end_time = format_datetime(war_data.get('endTime', 'N/A'))
+            numofAttacks = war_data['teamSize'] * 3
             war_info = (
                 f'```yaml\n'
                 f"**Current War Information**\n"
                 f"State: {war_data['state']}\n"
-                f"Team Size: {war_data['teamSize']}\n" 
+                f"Start Time: {start_time}\n"
+                f"End Time: {end_time}\n"
+                f"War Size: {war_data['teamSize']}\n" 
                 f"Clan: {war_data['clan']['name']} (Tag: {war_data['clan']['tag']})\n" 
                 f"Opponent: {war_data['opponent']['name']} (Tag: {war_data['opponent']['tag']})\n" 
-                f"Clan Stars: {war_data['clan']['stars']}\n" 
-                f"Opponent Stars: {war_data['opponent']['stars']}\n" 
-                f"Clan Destruction Percentage: {war_data['clan']['destructionPercentage']}\n" 
-                f"Opponent Destruction Percentage: {war_data['opponent']['destructionPercentage']}\n"
+                f"Clan Stars: {war_data['clan']['stars']} (Attacks: {war_data['clan']['attacks']}/{numofAttacks})\n" 
+                f"Opponent Stars: {war_data['opponent']['stars']} (Attacks: {war_data['opponent']['attacks']}/{numofAttacks})\n" 
+                f"Clan Destruction Percentage: {war_data['clan']['destructionPercentage']}%\n" 
+                f"Opponent Destruction Percentage: {war_data['opponent']['destructionPercentage']}%\n"
                 f"```\n"
 
         )
