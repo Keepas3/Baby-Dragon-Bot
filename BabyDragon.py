@@ -496,7 +496,58 @@ async def capitalRaid(interaction: discord.Interaction):
             start_time = format_datetime(entry.get('startTime', 'N/A'))
             end_time = format_datetime(entry.get('endTime', 'N/A'))
             capitalTotalLoot = entry.get('capitalTotalLoot')
-         #   attack_log = entry.get('attacks', [])
+            defensive_reward = entry.get('defensiveReward')
+            attacks = entry.get('totalAttacks')
+            reward =0
+         #made use of https://www.reddit.com/r/ClashOfClans/comments/yox6dd/how_offensive_raid_medals_are_precisely/ for calcs 
+            attack_log = entry.get('attackLog', [])
+            for hi in attack_log:
+                districts = hi.get('districts',[])
+                for crib in districts:
+                    destruction = crib.get('destructionPercent')
+                    capital = crib.get('name')
+                    level = crib.get('districtHallLevel')
+                    if destruction == 100:
+                        if capital == "Capital Peak":
+                            if level == 10:
+                                reward+=1450
+                            elif level ==9:
+                                reward+=1375
+                            elif level ==8:
+                                reward+=1260
+                            elif level ==7:
+                                reward+=1240
+                            elif level ==6:
+                                reward+=1115
+                            elif level ==5:
+                                reward+=810
+                            elif level ==4:
+                                reward+=585
+                            elif level ==3:
+                                reward+=360
+                            elif level ==2:
+                                reward+=180
+                        else:
+                            if level == 5:
+                                reward += 460
+                            if level == 4:
+                                reward += 405
+                            if level == 3:
+                                reward += 350
+                            if level == 2:
+                                reward += 225
+                            if level == 1:
+                                reward += 135   
+               # print((reward))
+            print(f"REWARD: {reward}")
+
+
+            reward = reward / attacks
+            print(reward)
+            reward = reward * 6.0
+            print(reward)
+            total_reward = reward + defensive_reward
+            print(total_reward)
 
             members = entry.get('members', [])
             attacks = 0
@@ -537,7 +588,7 @@ async def capitalRaid(interaction: discord.Interaction):
                 f"Status: {state}\n"
                 f"Start Time: {start_time}\n"
                 f"End Time: {end_time}\n"
-                f"Total Loot Obtained: {capitalTotalLoot}\n"
+                f"Raid Medals Earnings: {round(total_reward)} | Total Loot Obtained: {capitalTotalLoot}\n"
                 f"Member Loot Stats:\n{numbered_member_stats}\n"
                 f"```\n"
             )
@@ -565,7 +616,7 @@ async def previous_raids(interaction: discord.Interaction, limit: int =2):
         'Accept': 'application/json'
     }
     response = requests.get(url, headers=headers)
-    print(f"Response status: {response.status_code}, Response text: {response.text}")  # Debugging print statement
+    #print(f"Response status: {response.status_code}, Response text: {response.text}")  # Debugging print statement
     if response.status_code == 200:
         raid_data = response.json()
         seasons = raid_data.get('items', [])
@@ -576,26 +627,79 @@ async def previous_raids(interaction: discord.Interaction, limit: int =2):
 
         raid_info_list = []
         limit = max(2,min(limit,5))
+        reward = 0.0
         for i, entry in enumerate(seasons[:limit]):  # Limit to the first 5 seasons for brevity
             state = entry.get('state','N/A' )
             start_time = format_month_day_year(entry.get('startTime', 'N/A'))
             end_time = format_month_day_year(entry.get('endTime', 'N/A'))
             capitalTotalLoot = entry.get('capitalTotalLoot')
-            reward = entry.get('offensiveReward') + entry.get('defensiveReward')
-            if reward ==0:
-                reward = 'N/A'
+            attacks = entry.get('totalAttacks')
+            defensive_reward = entry.get('defensiveReward')
+            offensive_reward = entry.get('offensiveReward')
+            offensive_reward = offensive_reward * 6.0
+            total_reward = offensive_reward + defensive_reward
+            # nevermind this is not needed lmao after coding for an hour
+            # #made use of https://www.reddit.com/r/ClashOfClans/comments/yox6dd/how_offensive_raid_medals_are_precisely/ for calcs 
+            # attack_log = entry.get('attackLog', [])
+            # for hi in attack_log:
+            #     districts = hi.get('districts',[])
+            #     for crib in districts:
+            #         destruction = crib.get('destructionPercent')
+            #         capital = crib.get('name')
+            #         level = crib.get('districtHallLevel')
+            #         if destruction == 100:
+            #             if capital == "Capital Peak":
+            #                 if level == 10:
+            #                     reward+=1450
+            #                 elif level ==9:
+            #                     reward+=1375
+            #                 elif level ==8:
+            #                     reward+=1260
+            #                 elif level ==7:
+            #                     reward+=1240
+            #                 elif level ==6:
+            #                     reward+=1115
+            #                 elif level ==5:
+            #                     reward+=810
+            #                 elif level ==4:
+            #                     reward+=585
+            #                 elif level ==3:
+            #                     reward+=360
+            #                 elif level ==2:
+            #                     reward+=180
+            #             else:
+            #                 if level == 5:
+            #                     reward += 460
+            #                 if level == 4:
+            #                     reward += 405
+            #                 if level == 3:
+            #                     reward += 350
+            #                 if level == 2:
+            #                     reward += 225
+            #                 if level == 1:
+            #                     reward += 135   
+            #    # print((reward))
+            # print(f"REWARD: {reward}")
 
+
+            # reward = reward / attacks
+            # print(reward)
+            # reward = reward * 6.0
+            # print(reward)
+            # total_reward = reward + defensive_reward
+            # print(total_reward)
             raid_info = (
                 f"```yaml\n"
                 f"** Raid#{i+1} **\n"
                 f"Status: {state}\n"
                 f"Start time to End time: {start_time} - {end_time}\n"
                 f"Capital Loot Obtained: {capitalTotalLoot}\n"
-                f"Total Attacks: {entry.get('totalAttacks')} | Districts Destroyed: {entry.get('enemyDistrictsDestroyed')}\n"
-                f"Raid Medals Earned: {reward}\n"
+                f"Total Attacks: {attacks} | Districts Destroyed: {entry.get('enemyDistrictsDestroyed')}\n"
+                f"Raid Medals Earned: {round(total_reward)}\n"
                 f"```\n"
             )
             raid_info_list.append(raid_info)
+            rewards =0
         
         chunk_size = 2000
         raid_info_message = "\n".join(raid_info_list)
