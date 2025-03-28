@@ -8,6 +8,7 @@ from discord import app_commands
 from discord import Embed
 from discord.ext import commands
 from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 import random
 
 TOKEN = os.getenv('DISCORD_TOKEN2')
@@ -79,22 +80,22 @@ def check_coc_clan_tag(clan_tag):
     elif response.status_code == 404: 
         return False
 
-@bot.tree.command(name = 'setclantag')
-#@app_commands.checks.has_any_role("Admin", "Co-Leaders", "Elders")
-async def set_clan_tag(interaction: discord.Interaction, new_tag: str):
-    if check_coc_clan_tag(new_tag.replace('#', '%23')):
-        global clan_tag
-        clan_tag = new_tag.replace('#', '%23')
-        await interaction.response.send_message(f'Clan tag has been updated to {new_tag}')
-    else:
-        await interaction.response.send_message(f"Not a valid Clan ID") 
+# @bot.tree.command(name = 'setclantag')
+# #@app_commands.checks.has_any_role("Admin", "Co-Leaders", "Elders")
+# async def set_clan_tag(interaction: discord.Interaction, new_tag: str):
+#     if check_coc_clan_tag(new_tag.replace('#', '%23')):
+#         global clan_tag
+#         clan_tag = new_tag.replace('#', '%23')
+#         await interaction.response.send_message(f'Clan tag has been updated to {new_tag}')
+#     else:
+#         await interaction.response.send_message(f"Not a valid Clan ID") 
 
-@set_clan_tag.error 
-async def set_clan_tag_error(interaction: discord.Interaction, error): 
-    if isinstance(error, app_commands.MissingRole): 
-        await interaction.response.send_message("You don't have permission to use this command.") 
-    else:
-        await interaction.response.send_message(f"An error occurred: {error}")                  
+# @set_clan_tag.error 
+# async def set_clan_tag_error(interaction: discord.Interaction, error): 
+#     if isinstance(error, app_commands.MissingRole): 
+#         await interaction.response.send_message("You don't have permission to use this command.") 
+#     else:
+#         await interaction.response.send_message(f"An error occurred: {error}")                  
           
 # @bot.tree.command(name = "clean", description ='Clean messages from the bot')
 # async def clean(interaction : discord.Interaction, limit: int =2):
@@ -240,7 +241,7 @@ async def player_heroes(interaction: discord.Interaction, player_tag: str):
         for equip in filtered_equipment])
 
 
-        hero_informaton = (
+        hero_information = (
             f"```yaml\n"
             f"Name: {name} \n"
             f"Tag: {player_data['tag']}\n"
@@ -250,7 +251,7 @@ async def player_heroes(interaction: discord.Interaction, player_tag: str):
             f"{equipment_details}\n"
             f"```\n"
         )
-        await interaction.response.send_message(f'{hero_informaton}')
+        await interaction.response.send_message(f'{hero_information}')
     else:
         await interaction.response.send_message(f'Error: {response.status_code}, {response.text}')
 
@@ -316,11 +317,38 @@ async def clan_members(interaction: discord.Interaction, ranking: str = "TROPHIE
 
         # Generating member list
         for member in sorted_members:
+    if response.status_code == 200:
+        clan_data = response.json()
+        member_list = f"```yaml\n** Members Ranked by {ranking}: ** \n"
+
+        # Sorting members based on the specified ranking criteria
+        if ranking.upper() == "TROPHIES":
+            sorted_members = sorted(clan_data['items'], key=lambda member: member['trophies'], reverse=True)
+        elif ranking.upper() == "TH":
+            sorted_members = sorted(clan_data['items'], key=lambda member: member['townHallLevel'], reverse=True)
+        elif ranking.upper() == "ROLE":
+            role_order = {"leader": 1, "coLeader": 2, "admin": 3, "member": 4}
+            sorted_members = sorted(clan_data['items'], key=lambda member: role_order.get(member['role'], 5))
+        else:
+            await interaction.followup.send("Invalid ranking criteria. Please use: trophies, TH, or role.")
+            return
+
+        # Generating member list
+        for member in sorted_members:
             role = member['role']
+            if role in ['coLeader', 'leader', 'elder','admin']:
+                if role == 'admin':
             if role in ['coLeader', 'leader', 'elder','admin']:
                 if role == 'admin':
                     role = 'elder'
                 role = role.upper()
+            member_info = (
+                f"{member['clanRank']}. {member['name']}, Role: {role}, (TH: {member['townHallLevel']})\n"
+            )
+            if len(member_list) + len(member_info) > 2000 - 3:  # 3 is for the closing ```
+                break
+            member_list += member_info
+
             member_info = (
                 f"{member['clanRank']}. {member['name']}, Role: {role}, (TH: {member['townHallLevel']})\n"
             )
@@ -502,6 +530,7 @@ async def capitalRaid(interaction: discord.Interaction):
             return
 
         raid_info_list = []
+        for i, entry in enumerate(seasons[:1]):  # Limit to the first season
         for i, entry in enumerate(seasons[:1]):  # Limit to the first season
             state = entry.get('state','N/A' )
             start_time = format_datetime(entry.get('startTime', 'N/A'))
@@ -991,7 +1020,9 @@ async def warInfo(interaction:discord.Interaction):
     if response.status_code == 200: 
         war_data = response.json() 
         war_info = "No war information available."
+        war_info = "No war information available."
 
+        if 'state' in war_data or war_data['state'] == 'inWar': 
         if 'state' in war_data or war_data['state'] == 'inWar': 
             if 'clans' in war_data: 
                 clan_info = "\n".join([ f"Clan{i+1}: {clan['name']} (Tag: {clan['tag']})" 
@@ -1072,6 +1103,8 @@ async def CWL_clan_search(interaction: discord.Interaction, clanname: str):
         
         if not clan_found:
             await interaction.followup.send(f"Clan '{clanname}' not found in the current CWL.")
+        elif response.status_code == 404: 
+            await interaction.followup.send("Currently not in CWL.")    
     else:
         await interaction.followup.send(f"Error retrieving CWL information: {response.status_code}, {response.text}")
 
