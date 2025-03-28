@@ -5,8 +5,9 @@ import requests
 import praw
 from datetime import timedelta
 from discord import app_commands
+from discord import Embed
 from discord.ext import commands
-from datetime import datetime, timedelta 
+from datetime import datetime, timedelta, timezone
 import random
 
 TOKEN = os.getenv('DISCORD_TOKEN2')
@@ -26,8 +27,20 @@ def format_datetime(dt_str):
     if not dt_str:
         return "N/A"
     try: 
-        dt = datetime.strptime(dt_str,'%Y%m%dT%H%M%S.%fZ')
-        return dt.strftime('%Y-%m-%d %H:%M:%S')
+        dt = datetime.strptime(dt_str, '%Y%m%dT%H%M%S.%fZ').replace(tzinfo=timezone.utc)
+        # Convert to Eastern Standard Time (EST)
+        est = dt.astimezone(timezone(timedelta(hours=-5)))
+        return est.strftime('%Y-%m-%d %H:%M:%S %p EST')
+    except ValueError:
+        return "N/A"
+def format_month_day_year(dt_str):
+    if not dt_str:
+        return "N/A"
+    try: 
+        dt = datetime.strptime(dt_str, '%Y%m%dT%H%M%S.%fZ').replace(tzinfo=timezone.utc)
+        # Convert to Eastern Standard Time (EST)
+        est = dt.astimezone(timezone(timedelta(hours=-5)))
+        return est.strftime('%m-%d-%Y')
     except ValueError:
         return "N/A"
 
@@ -92,69 +105,67 @@ async def set_clan_tag_error(interaction: discord.Interaction, error):
 #     await interaction.followup.send(f"Deleted {len(deleted)} messages")
 
 
-@bot.tree.command(name ="goldpass", description= "Information about start/end of current gold pass")
-async def goldpass(interaction: discord.Interaction):
-    await interaction.response.defer()
-    url = f'https://api.clashofclans.com/v1/goldpass/seasons/current'
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-    'Accept': 'application/json'
-    }
-    response = requests.get(url, headers=headers)
-    if response.status_code ==200:
-        gold_pass_data = response.json()
-        
-        start = gold_pass_data.get('startTime')
-        end = gold_pass_data.get('endTime')
-
-        start_date = format_datetime(start)
-        end_date = format_datetime(end)
-        pass_info = (
-            f"** Gold Pass:**\n"
-            f"```yaml\n"
-           # f"Current Gold Pass Season: {gold_pass_data['name']}\n"
-            f"Start Date:{start_date}\n"
-            f"End Date:{end_date}\n"
-            f"```"
-
-        )
-        await interaction.followup.send(pass_info)
-    else: 
-        await interaction.followup.send(f"Error retrieving gold pass information: {response.status_code}, {response.text}")
     
 
-@bot.tree.command(name = "playerinfo", description = "Get player's general information")
+@bot.tree.command(name="playerinfo", description="Get player's general information")
 async def player_info(interaction: discord.Interaction, player_tag: str):
-   # player_tag = '#LOLLG98LJ'.replace('#', '%23')
     player_tag = player_tag.replace('#', '%23')
     if not api_key:
         raise ValueError("API KEY NOT FOUND")
-    url = f'https://api.clashofclans.com/v1/players/{player_tag}' 
-    headers = { 
-        'Authorization': f'Bearer {api_key}', 
-        'Accept': 'application/json' 
-    } 
-    response = requests.get(url, headers=headers) 
-    if response.status_code == 200: 
-        player_data = response.json() 
+
+    url = f'https://api.clashofclans.com/v1/players/{player_tag}'
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Accept': 'application/json'
+    }
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        player_data = response.json()
         labels = [label for label in player_data['labels']]
         filtered_labels = ', '.join([f"{label['name']}" for label in labels])
+        player_name = player_data['name']
+        role = player_data['role']
 
-        player_information = (
-            f"**Player Information**\n" 
-            f"```yaml\n"
-            f"Name: {player_data['name']}\n" 
-            f"Tag: {player_data['tag']}\n"
-            f"THLVL: {player_data['townHallLevel']}\n" 
-            f"Trophies: {player_data['trophies']}\n" 
-            f"Best Trophies: {player_data['bestTrophies']}\n"
-            f"{filtered_labels}"
-            f"```\n"
+        # Create a Discord Embed object
+        if role == 'admin':
+            role = "Elder"
+        elif role == 'coLeader':
+            role = "Co-Leader"
+        elif role == 'leader':
+            role = "Leader"
+        elif role == 'member':
+            role == "Member"
+        
+        
+        embed = discord.Embed(
 
-    )
-        await interaction.response.send_message(f"{player_information}")
-    else: 
-        await interaction.response.send_message(f"Error getting player information")
+            title=f"User: {player_name}, {player_data['tag']}",
+            description=filtered_labels if filtered_labels else 'None',
+            # url=f"https://www.clashofstats.com/players/{player_name}-{player_tag}/summary",
+            color=0x0000FF  # Set an aesthetic color for the embed
+        )
+        embed.set_thumbnail(url=player_data['league']['iconUrls']['small'])
+        embed.add_field(name="Clan Name", value=player_data['clan']['name'], inline=True)
+        embed.add_field(name="Tag", value=player_data['clan']['tag'], inline=True)
+        embed.add_field(name="Role", value=role, inline=True)
+
+        embed.add_field(name="TH Lvl", value=player_data['townHallLevel'], inline=True)
+        embed.add_field(name="Exp Lvl", value=player_data['expLevel'], inline=True)
+        embed.add_field(name="War Preference", value=player_data['warPreference'], inline=True)
+        
+        embed.add_field(name="Trophies", value=player_data['trophies'], inline=True)
+        embed.add_field(name="Best Trophies", value=player_data['bestTrophies'], inline=True)
+        embed.add_field(name="War Stars", value=player_data['warStars'], inline=True)
+
+        embed.add_field(name="Donated", value=player_data['donations'], inline=True)
+        embed.add_field(name="Received", value=player_data['donationsReceived'], inline=True)
+        embed.add_field(name="Capital Contributions", value=player_data['clanCapitalContributions'], inline=True)
+
+        # Send the embed response
+        await interaction.response.send_message(embed=embed)
+    else:
+        await interaction.response.send_message(f"Error getting player information: {response.status_code}")
 
 
 
@@ -276,32 +287,52 @@ async def player_spells(interaction: discord.Interaction, player_tag: str):
     else:
         await interaction.response.send_message(f'Error: {response.status_code}, {response.text}')
 
- #Lists all clan members in clan 
-@bot.tree.command(name="clanmembers", description="Get all member info of the clan") 
-async def clan_members(interaction: discord.Interaction): 
-    await interaction.response.defer() # Defer the interaction to allow time for processing
-    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}'
-    headers = { 'Authorization': f'Bearer {api_key}', 
-    'Accept': 'application/json' 
+#Lists all clan members in clan 
+@bot.tree.command(name="clanmembers", description="Get all member info of the clan sorted by trophies by default") 
+@app_commands.describe(ranking= "List by trophies(default), TH, role")
+async def clan_members(interaction: discord.Interaction, ranking: str = "TROPHIES"): 
+    await interaction.response.defer()  # Defer the interaction to allow time for processing
+    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}/members'
+    headers = { 
+        'Authorization': f'Bearer {api_key}', 
+        'Accept': 'application/json' 
     }
     response = requests.get(url, headers=headers) 
-    if response.status_code == 200: 
-        clan_data = response.json() 
-        member_list = "```yaml\n**  Members Ranked by Trophies: ** \n" 
-        for member in clan_data['memberList']:
+    if response.status_code == 200:
+        clan_data = response.json()
+        member_list = f"```yaml\n** Members Ranked by {ranking}: ** \n"
+
+        # Sorting members based on the specified ranking criteria
+        if ranking.upper() == "TROPHIES":
+            sorted_members = sorted(clan_data['items'], key=lambda member: member['trophies'], reverse=True)
+        elif ranking.upper() == "TH":
+            sorted_members = sorted(clan_data['items'], key=lambda member: member['townHallLevel'], reverse=True)
+        elif ranking.upper() == "ROLE":
+            role_order = {"leader": 1, "coLeader": 2, "admin": 3, "member": 4}
+            sorted_members = sorted(clan_data['items'], key=lambda member: role_order.get(member['role'], 5))
+        else:
+            await interaction.followup.send("Invalid ranking criteria. Please use: trophies, TH, or role.")
+            return
+
+        # Generating member list
+        for member in sorted_members:
             role = member['role']
-            if role in ['coLeader', 'leader', 'admin']:
-                if role =='admin':
+            if role in ['coLeader', 'leader', 'elder','admin']:
+                if role == 'admin':
                     role = 'elder'
                 role = role.upper()
-            member_list += ( 
-            f"{member['clanRank']}. {member['name']}, Role: {role}, TH: {member['townHallLevel']}\n" 
+            member_info = (
+                f"{member['clanRank']}. {member['name']}, Role: {role}, (TH: {member['townHallLevel']})\n"
+            )
+            if len(member_list) + len(member_info) > 2000 - 3:  # 3 is for the closing ```
+                break
+            member_list += member_info
 
-            ) 
         member_list += "```"
         await interaction.followup.send(member_list)
     else: 
-        await interaction.response.send_message(f'Error: {response.status_code}, {response.text}')   
+        await interaction.response.send_message(f'Error: {response.status_code}, {response.text}')
+   
               
 
 @bot.tree.command(name ="lookupclans", description = "search for clans")
@@ -360,73 +391,89 @@ max_members: int = None, minclan_level: int = None , limits: int=1
 
     await interaction.followup.send(clan_info_formatted)
 
-@bot.tree.command(name="lookupmember", description="Get Clan info for a specific user") 
-async def user_info(interaction: discord.Interaction, username: str): 
-    await interaction.response.defer() # Defer the interaction to allow time for processing 
-    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}' 
-    headers = { 'Authorization': f'Bearer {api_key}', 
-    'Accept': 'application/json' 
-    } 
-    response = requests.get(url, headers=headers) 
-    if response.status_code == 200: 
-        clan_data = response.json() 
-        user_found = False
-
-        for member in clan_data['memberList']: 
-            if member['name'].lower() == username.lower(): 
-                member_info = ( f"**Member Information:**\n" 
-                f"```yaml\n"
-                f"Player Tag: {member['tag']}\n" 
-                f"Name: {member['name']}\n" 
-                f"Role: {member['role']}\n" 
-                f"Experience Level: {member['expLevel']}\n" 
-                f"Trophies: {member['trophies']}\n"
-                f"Donations: {member['donations']}\n" 
-                f"Donations Received: {member['donationsReceived']}" 
-                f"```\n"
-                ) 
-                chunks = [member_info[i:i + 2000] for i in range(0, len(member_info), 2000)] 
-                for chunk in chunks: 
-                    await interaction.followup.send(chunk) 
-
-                user_found = True 
-                break
-        if not user_found: 
-            await interaction.followup.send(f'User "{username}" not found in the clan.') 
-    else: 
-        await interaction.followup.send(f'Error: {response.status_code}, {response.text}')
-
-               
-@bot.tree.command(name="claninfo", description="Retrieve information about the clan")
-async def clanInfo(interaction: discord.Interaction):
+@bot.tree.command(name="lookupmember", description="Get Clan info for a specific user")
+async def user_info(interaction: discord.Interaction, username: str):
     await interaction.response.defer()  # Defer the interaction to allow time for processing
-    if not api_key:
-        raise ValueError("API KEY NOT FOUND")
+
     url = f'https://api.clashofclans.com/v1/clans/{clan_tag}'
     headers = {
         'Authorization': f'Bearer {api_key}',
         'Accept': 'application/json'
     }
     response = requests.get(url, headers=headers)
-  #  print(f"Response status: {response.status_code}, Response text: {response.text}")  # Debugging print statement
+
     if response.status_code == 200:
         clan_data = response.json()
-        averageTHLVL+= {clan_data['townHallLevel']} #IMPLEMENT THIS
-        clan_info = (
-            f"**Clan Information**\n"
-            f"```yaml\n"
-            f"Name: {clan_data['name']}\n"
-            f"Tag: {clan_data['tag']}\n"
-            f"Clan Level: {clan_data['clanLevel']}\n"
-            f"Clan Points: {clan_data['clanPoints']}\n"
-            f"Members: {clan_data['members']}\n"
-            f"Description: {clan_data['description']}\n"
-            f"Required Trophies: {clan_data['requiredTrophies']}\n"
-            f"Location: {clan_data['location']['name']}\n"
-            f"```\n"
-        )
+        user_found = False
 
-        await interaction.followup.send(clan_info)
+        for member in clan_data['memberList']:
+            if member['name'].lower() == username.lower():
+                role = member['role']
+                embed = discord.Embed(
+                    title=f"{member['name']}",
+                    color=discord.Color.green(),
+                    description= member['tag']
+                )
+             #   print(role)
+                if role == 'admin':
+                    role = "Elder"
+                elif role == 'coLeader':
+                    role = "Co-Leader"
+
+                embed.set_thumbnail(url= member['league']['iconUrls']['small'])
+                # embed.add_field(name="Player Tag", value=member['tag'], inline=True)
+                embed.add_field(name="TownHall Level", value=str(member['townHallLevel']), inline=True)
+                embed.add_field(name="Clan Rank", value=str(member['clanRank']), inline=False)
+                embed.add_field(name="Role", value=role, inline=True)
+                embed.add_field(name="Trophies", value=f"{member['trophies']} | {member['league']['name']}", inline=False)
+                embed.add_field(name="Builder Base Trophies", value=f"{member['builderBaseTrophies']} | {member['builderBaseLeague']['name']}", inline=False)
+                embed.add_field(name="Donations", value=f"Given: {member['donations']} | Received: {member['donationsReceived']}", inline=False)
+
+                await interaction.followup.send(embed=embed)
+                user_found = True
+                break
+
+        if not user_found:
+            await interaction.followup.send(f'User "{username}" not found in the clan.')
+
+    else:
+        await interaction.followup.send(f"Error retrieving clan info: {response.status_code}, {response.text}")
+
+               
+@bot.tree.command(name="claninfo", description="Retrieve information about the clan")
+async def clanInfo(interaction: discord.Interaction):
+    await interaction.response.defer()
+    if not api_key:
+        raise ValueError("API KEY NOT FOUND")
+    
+    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}'
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Accept': 'application/json'
+    }
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        clan_data = response.json()
+        
+        embed = Embed(
+            title="Clan Information",
+            color=0x3498db,
+        )
+        embed.set_thumbnail(url=clan_data['badgeUrls']['small'])
+        embed.add_field(name="Name", value=clan_data['name'], inline=True)
+        embed.add_field(name="Tag", value=clan_data['tag'], inline=True)
+
+        embed.add_field(name="Members", value=f"{clan_data['members']} / 50", inline=False)
+
+        embed.add_field(name="Clan Level", value=clan_data['clanLevel'], inline=True)
+        embed.add_field(name="Clan Points", value=clan_data['clanPoints'], inline=True)
+        embed.add_field(name="Description", value=clan_data['description'], inline=False)
+        embed.add_field(name="Required Trophies", value=clan_data['requiredTrophies'], inline=False)
+        embed.add_field(name="Win/loss ratio", value=f"{clan_data['warWins']} / {clan_data['warLosses']}", inline=False)
+        embed.add_field(name="Location", value=clan_data['location']['name'], inline=False)
+
+        await interaction.followup.send(embed=embed)
     elif response.status_code == 404:
         await interaction.followup.send("No information found for the specified clan.")
     else:
@@ -434,7 +481,7 @@ async def clanInfo(interaction: discord.Interaction):
 
 
 
-@bot.tree.command(name="capitalraid", description="Retrieve information about info on current raid for the clan")
+@bot.tree.command(name="capitalraid", description="Retrieve information about info on current raid for clan")
 async def capitalRaid(interaction: discord.Interaction):
     await interaction.response.defer()  # Defer the interaction to allow time for processing
     if not api_key:
@@ -455,12 +502,16 @@ async def capitalRaid(interaction: discord.Interaction):
             return
 
         raid_info_list = []
-        for i, entry in enumerate(seasons[:1]):  # Limit to the first 5 seasons for brevity
+        for i, entry in enumerate(seasons[:1]):  # Limit to the first season
             state = entry.get('state','N/A' )
             start_time = format_datetime(entry.get('startTime', 'N/A'))
             end_time = format_datetime(entry.get('endTime', 'N/A'))
             capitalTotalLoot = entry.get('capitalTotalLoot')
-         #   attack_log = entry.get('attacks', [])
+            defensive_reward = entry.get('defensiveReward')
+            offensive_reward = entry.get('offensiveReward')
+            total_attacks = entry.get('totalAttacks')
+            reward =0
+            
 
             members = entry.get('members', [])
             attacks = 0
@@ -468,7 +519,6 @@ async def capitalRaid(interaction: discord.Interaction):
             member_loot_stats = {}
             member_attacks = {}
             for member in members:
-               # attacker = attack.get('members', {})
                 member_name = member.get('name', 'N/A')
               #  print(f"Attacker info: {attacker}")  # Debugging print statement
                 total_loot = member.get('capitalResourcesLooted', 0)
@@ -493,19 +543,77 @@ async def capitalRaid(interaction: discord.Interaction):
                 [f"{idx + 1}. {member}: {loot} loot, {member_attacks.get(member, 0)} attack(s)" 
                 for idx, (member, loot) in enumerate(sorted_member_stats)] 
                 )
+            #made use of https://www.reddit.com/r/ClashOfClans/comments/yox6dd/how_offensive_raid_medals_are_precisely/ for calcs 
+            if state == 'ongoing':
+                attack_log = entry.get('attackLog', [])
+                for hi in attack_log:
+                    districts = hi.get('districts',[])
+                    for crib in districts:
+                        destruction = crib.get('destructionPercent')
+                        capital = crib.get('name')
+                        level = crib.get('districtHallLevel')
+                        if destruction == 100:
+                            if capital == "Capital Peak":
+                                if level == 10:
+                                    reward+=1450
+                                elif level ==9:
+                                    reward+=1375
+                                elif level ==8:
+                                    reward+=1260
+                                elif level ==7:
+                                    reward+=1240
+                                elif level ==6:
+                                    reward+=1115
+                                elif level ==5:
+                                    reward+=810
+                                elif level ==4:
+                                    reward+=585
+                                elif level ==3:
+                                    reward+=360
+                                elif level ==2:
+                                    reward+=180
+                            else:
+                                if level == 5:
+                                    reward += 460
+                                if level == 4:
+                                    reward += 405
+                                if level == 3:
+                                    reward += 350
+                                if level == 2:
+                                    reward += 225
+                                if level == 1:
+                                    reward += 135   
 
-            
-            raid_info = (
+                reward = reward / total_attacks
+                print(reward)
+                reward = reward * 6.0
+                print(reward)
+                # print(total_reward)
+                raid_info = (
                # f"**Season #{i + 1}**\n"
                 f"```yaml\n"
                 f"Status: {state}\n"
                 f"Start Time: {start_time}\n"
                 f"End Time: {end_time}\n"
-                f"Total Loot Obtained: {capitalTotalLoot}\n"
+                f"Estimated Earning Medals: {round(reward)} | Total Loot: {capitalTotalLoot}\n"
                 f"Member Loot Stats:\n{numbered_member_stats}\n"
                 f"```\n"
             )
-            raid_info_list.append(raid_info)
+            elif state == 'ended' and defensive_reward !=0 and offensive_reward!=0:
+                offensive_reward = offensive_reward * 6.0
+                total_reward = offensive_reward + defensive_reward
+                raid_info = (
+               # f"**Season #{i + 1}**\n"
+                f"```yaml\n"
+                f"Status: {state}\n"
+                f"Start Time: {start_time}\n"
+                f"End Time: {end_time}\n"
+                f"Raid Medals Earned: {round(total_reward)} | Total Loot Obtained: {capitalTotalLoot}\n"
+                f"Member Loot Stats:\n{numbered_member_stats}\n"
+                f"```\n"
+            )
+        
+        raid_info_list.append(raid_info)
         
         chunk_size = 2000
         raid_info_message = "\n".join(raid_info_list)
@@ -516,9 +624,11 @@ async def capitalRaid(interaction: discord.Interaction):
     else:
         await interaction.followup.send(f"Error retrieving capital raid seasons: {response.status_code}, {response.text}")
 
-        
+
+
 @bot.tree.command(name="previousraids", description="Retrieve information about capital raid seasons for the clan")
-async def previous_raids(interaction: discord.Interaction):
+@app_commands.describe(limit="The number of raids to retrieve (default:2, max:5)")
+async def previous_raids(interaction: discord.Interaction, limit: int = 2):
     await interaction.response.defer()  # Defer the interaction to allow time for processing
     if not api_key:
         raise ValueError("API KEY NOT FOUND")
@@ -528,7 +638,8 @@ async def previous_raids(interaction: discord.Interaction):
         'Accept': 'application/json'
     }
     response = requests.get(url, headers=headers)
- #   print(f"Response status: {response.status_code}, Response text: {response.text}")  # Debugging print statement
+    # print(f"Response status: {response.status_code}, Response text: {response.text}")  # Debugging print statement
+
     if response.status_code == 200:
         raid_data = response.json()
         seasons = raid_data.get('items', [])
@@ -537,39 +648,55 @@ async def previous_raids(interaction: discord.Interaction):
             await interaction.followup.send("No capital raid seasons found for the specified clan.")
             return
 
-        raid_info_list = []
-        for i, entry in enumerate(seasons[:5]):  # Limit to the first 5 seasons for brevity
-            state = entry.get('state','N/A' )
-            start_time = format_datetime(entry.get('startTime', 'N/A'))
-            end_time = format_datetime(entry.get('endTime', 'N/A'))
-            capitalTotalLoot = entry.get('capitalTotalLoot')
-            raid_info = (
-                f"**Season #{i + 1}**\n"
-                f"```yaml\n"
-                f"Status: {state}\n"
-                f"Start Time: {start_time}\n"
-                f"End Time: {end_time}\n"
-                f"Total Loot Obtained: {capitalTotalLoot}"
-                f"```\n"
+        limit = max(2, min(limit, 5))  # Limit the number of raids retrieved
+        for i, entry in enumerate(seasons[:limit]):  # Limit to the first few seasons
+            state = entry.get('state', 'N/A')
+            start_time = format_month_day_year(entry.get('startTime', 'N/A'))
+            end_time = format_month_day_year(entry.get('endTime', 'N/A'))
+            capital_total_loot = entry.get('capitalTotalLoot', 'N/A')
+            attacks = entry.get('totalAttacks', 'N/A')
+            defensive_reward = entry.get('defensiveReward', 0)
+            offensive_reward = entry.get('offensiveReward', 0) * 6.0
+            total_reward = offensive_reward + defensive_reward
+            districts_destroyed = entry.get('enemyDistrictsDestroyed', 'N/A')
+            total_attacks = entry.get('totalAttacks')
+            
+            if state == 'ongoing':
+                colors=0xffff00 
+            if state == 'ended':
+                colors= 0x1abc9c 
+            # Create embed
+            embed = Embed(
+                title=f"Raid #{i + 1}:",
+                color=colors  # Light green color
             )
-            raid_info_list.append(raid_info)
-        
-        chunk_size = 2000
-        raid_info_message = "\n".join(raid_info_list)
-        for i in range(0, len(raid_info_message), chunk_size):
-            await interaction.followup.send(raid_info_message[i:i+chunk_size])
+            embed.add_field(name="Status", value=state, inline=False)
+            embed.add_field(name="Start Time", value=start_time, inline=True)
+            embed.add_field(name="End Time", value=end_time, inline=True)
+            embed.add_field(name="Capital Loot Obtained", value=capital_total_loot, inline=False)
+            embed.add_field(name="Total Attacks", value=attacks, inline=True)
+            embed.add_field(name="Districts Destroyed", value=districts_destroyed, inline=True)
+            if total_reward ==0:
+                embed.add_field(name="Raid Medals Earned", value="Still Calculating...", inline=False)
+            else:
+                embed.add_field(name="Raid Medals Earned", value=round(total_reward), inline=False)
+            
+            # Send the embed for each raid
+            await interaction.followup.send(embed=embed)
+
     elif response.status_code == 404:
         await interaction.followup.send("No capital raid seasons found for the specified clan.")
     else:
         await interaction.followup.send(f"Error retrieving capital raid seasons: {response.status_code}, {response.text}")
-    
+
 
 @bot.tree.command(name="warlog", description="Retrieve the war log for the specified clan")
-@app_commands.describe(limit = "The number of wars to retrieve (default 1, max 5)" )
-async def warLog(interaction: discord.Interaction, limit: int=1):
+@app_commands.describe(limit="The number of wars to retrieve (default 1, max 8)")
+async def warLog(interaction: discord.Interaction, limit: int = 1):
     await interaction.response.defer()  # Defer the interaction to allow time for processing
     if not api_key:
         raise ValueError("API KEY NOT FOUND")
+
     url = f'https://api.clashofclans.com/v1/clans/{clan_tag}/warlog'
     headers = {
         'Authorization': f'Bearer {api_key}',
@@ -579,36 +706,68 @@ async def warLog(interaction: discord.Interaction, limit: int=1):
     if response.status_code == 200:
         war_log = response.json()
         war_entries = war_log.get('items', [])
-        
-        end_time = war_log.get('endTime')
-        end_date = format_datetime(end_time)
-     #   end_time = format_datetime(war_log.get('endTime', ''))
+
         if not war_entries:
             await interaction.followup.send("No war log entries found for the specified clan.")
             return
 
-        limit = max(1,min(limit, 5))
+        # Ensure the limit is constrained between 1 and 8
+        limit = max(1, min(limit, 8))
+
+        # Take the most recent `limit` wars (assuming they are listed first)
         war_entries = war_entries[:limit]
 
-        war_info_list = [
-            (
-                f'```yaml\n'
-                f"**War#{i + 1}**\n"
-                f"Result: {entry['result']}\n"
-                f"Team Size: {entry['teamSize']}\n"
-                f"Opponent: {entry['opponent']['name']} (Tag: {entry['opponent']['tag']})\n"
-                f"Clan Stars: {entry['clan']['stars']}, Clan Destruction: {entry['clan']['destructionPercentage']}%\n"
-                f"Opponent Stars: {entry['opponent']['stars']}, Opponent Destruction: {entry['opponent']['destructionPercentage']}%\n"
-                f"Exp Gained: {entry['clan']['expEarned']}, Clan Level: {entry['clan'].get('clanLevel', 'N/A')}\n"
-                f"End Date: {format_datetime(entry.get('endTime', 'N/A'))}\n" # Correctly retrieve and format endTime for each entry
-                f"```\n"
+        # Generate embed messages for each war entry
+        for i, entry in enumerate(war_entries):
+            attacks_per_member = entry['attacksPerMember']
+            opponent_name = entry['opponent'].get('name', 'CWL')
+            opponent_tag = entry['opponent'].get('tag', '')
+            clan_destruction = round(entry['clan']['destructionPercentage'],2)
+            opp_destruction = round(entry['opponent']['destructionPercentage'],2)
+            
+            # Determine embed color based on the result
+            if entry['result'] == "win":
+                embed_color = 0x00ff00  # Green for win
+            elif entry['result'] == "lose":
+                embed_color = 0xff0000  # Red for loss
+            elif entry['result'] == "tie":
+                embed_color = 0xffff00  # Yellow for tie
+            else:
+                embed_color = 0x808080  # Gray for unknown results
+            
+            embed = Embed(
+                title=f"{entry['clan']['name']} vs {opponent_name}",
+                description=f"Result: {entry['result'].capitalize()}",
+                color=embed_color  # Apply dynamic color
             )
-            for i, entry in enumerate(war_entries)
-        ]
-
-        war_info_message = "\n".join(war_info_list)
+            
         
-        await interaction.followup.send(war_info_message)
+
+            if attacks_per_member == 2:  # Regular War
+                embed.add_field(name="Clan Tag", value=entry['clan']['tag'], inline=True)
+                embed.add_field(name="Clan Stars", value=entry['clan']['stars'], inline=True)
+                embed.add_field(name="Clan Destruction", value=f"{clan_destruction}%", inline=True)
+
+                embed.add_field(name="Opponent Tag", value=opponent_tag, inline=True)
+                embed.add_field(name="Opponent Stars", value=entry['opponent']['stars'], inline=True)
+                embed.add_field(name="Opponent Destruction", value=f"{opp_destruction}%", inline=True)
+
+                embed.add_field(name="Team Size", value=entry['teamSize'], inline=True)
+                embed.add_field(name="Exp Gained", value=entry['clan']['expEarned'], inline=True)
+                embed.add_field(name="Clan Level", value=entry['clan'].get('clanLevel', 'N/A'), inline=True)
+
+            elif attacks_per_member == 1:  # CWL Log
+                embed.add_field(name="Clan Stars", value=entry['clan']['stars'], inline=True)
+                embed.add_field(name="Clan Destruction", value=f"{clan_destruction}%", inline=True)
+                embed.add_field(name="Team Size", value=entry['teamSize'], inline=False)
+
+
+            embed.add_field(name="End Date", value=format_month_day_year(entry.get('endTime', 'N/A')), inline=False)
+            embed.set_footer(text="Clash of Clans War Log")
+
+            # Send the embed to the user
+            await interaction.followup.send(embed=embed)
+
     elif response.status_code == 404:
         await interaction.followup.send("No war log found for the specified clan.")
     else:
@@ -616,8 +775,97 @@ async def warLog(interaction: discord.Interaction, limit: int=1):
 
 
 
+@bot.tree.command(name="currentwar", description="Receive general information about current war")
+async def warInfo(interaction: discord.Interaction):
+    await interaction.response.defer()  # Defer the interaction to allow time for processing
 
-@bot.tree.command(name = "currentwar", description = "Recieve information about current war")
+    if not api_key:
+        raise ValueError("API KEY NOT FOUND")
+
+    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}/currentwar'
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Accept': 'application/json'
+    }
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        war_data = response.json()
+        state = war_data['state']
+
+        if state == 'inWar' or state == 'warEnded':
+            start_time = format_datetime(war_data.get('startTime', 'N/A'))
+            end_time = format_datetime(war_data.get('endTime', 'N/A'))
+            num_of_attacks = war_data['teamSize'] * 2
+            clan_stars = war_data['clan']['stars']
+            opp_stars = war_data['opponent']['stars']
+            destruction_percentage = round(war_data['clan']['destructionPercentage'], 2)
+            opp_destruction_percentage = round(war_data['opponent']['destructionPercentage'], 2)
+
+            # Create the embed
+            embed = Embed(
+                title=f"{war_data['clan']['name']} vs {war_data['opponent']['name']}",
+                description=f"State: {war_data['state'].capitalize()}",
+                color=0x00ff00 if state == 'inWar' and clan_stars > opp_stars and destruction_percentage > opp_stars
+                else 0xff0000 if state == 'inWar' and clan_stars < opp_stars and destruction_percentage < opp_destruction_percentage
+                  else 0x808080  # Green for winning ongoing wars, red is for losing ongoing wars, Gray for ended
+            )
+            embed.add_field(name="Start Time", value=start_time, inline=True)
+            embed.add_field(name="End Time", value=end_time, inline=True)
+
+            embed.add_field(name="War Size", value=war_data['teamSize'], inline=False)
+
+            embed.add_field(name="Clan Tag", value=war_data['clan']['tag'], inline=True)
+            embed.add_field(name="Clan Stars", value=f"{clan_stars} (Attacks: {war_data['clan']['attacks']}/{num_of_attacks})", inline=True)
+            embed.add_field(name="Clan Destruction", value=f"{destruction_percentage}%", inline=True)
+
+            embed.add_field(name="Opponent Tag", value=war_data['opponent']['tag'], inline=True)
+            embed.add_field(name="Opponent Stars", value=f"{opp_stars} (Attacks: {war_data['opponent']['attacks']}/{num_of_attacks})", inline=True)
+            embed.add_field(name="Opponent Destruction", value=f"{opp_destruction_percentage}%", inline=True)
+
+            embed.set_footer(text="Clash of Clans Current War Information")
+
+            await interaction.followup.send(embed=embed)
+
+        elif state == 'preparation':
+            start_time = format_datetime(war_data.get('startTime', 'N/A'))
+            end_time = format_datetime(war_data.get('endTime', 'N/A'))
+            preparation_time = format_datetime(war_data.get('preparationStartTime', 'N/A'))
+
+            # Create the embed
+            embed = Embed(
+                title="War Preparation",
+                description="Current War is in preparation state.",
+                color=0xFFFF00  # Yellow for preparation
+            )
+            embed.add_field(name="Preparation Start Time", value=preparation_time, inline=True)
+            embed.add_field(name="Start Time", value=start_time, inline=True)
+            embed.add_field(name="End Time", value=end_time, inline=True)
+            embed.add_field(name="War Size", value=war_data['teamSize'], inline=True)
+            embed.add_field(name="Clan", value=f"{war_data['clan']['name']} (Tag: {war_data['clan']['tag']})", inline=False)
+            embed.add_field(name="Opponent", value=f"{war_data['opponent']['name']} (Tag: {war_data['opponent']['tag']})", inline=False)
+            embed.set_footer(text="Clash of Clans War Preparation Info")
+
+            await interaction.followup.send(embed=embed)
+
+        elif state == 'notInWar':
+            # Create the embed for not in war state
+            embed = Embed(
+                title="No Active War",
+                description="The clan is currently not in war.",
+                color=0xFF2C2C  # Blue for no war
+            )
+            embed.add_field(name="State", value=war_data['state'], inline=False)
+            embed.set_footer(text="Clash of Clans Current War Info")
+
+            await interaction.followup.send(embed=embed)
+
+    elif response.status_code == 404:
+        await interaction.followup.send("No current war found for the specified clan.")
+    else:
+        await interaction.followup.send(f"Error retrieving current war info: {response.status_code}, {response.text}")
+
+@bot.tree.command(name = "currentwarstats", description = "Recieve player's information about current war")
 async def warInfo(interaction:discord.Interaction):
     await interaction.response.defer() # Defer the interaction to allow time for processing 
     
@@ -628,43 +876,106 @@ async def warInfo(interaction:discord.Interaction):
     'Accept': 'application/json' 
     } 
     response = requests.get(url, headers=headers) 
-    print(f"Response status: {response.status_code}, Response text: {response.text}") # Debugging print statement
+   # print(f"Response status: {response.status_code}, Response text: {response.text}") # Debugging print statement
     if response.status_code == 200: 
         war_data = response.json() 
+        war_state = war_data['state']
+        print(war_state)
+        members_with_attacks = []
+        members_without_attacks = []
 
-        if war_data['state'] == 'inWar':
+        if not war_data or 'state' not in war_data or not war_data['state']:
+            # Handle the case where war_data['state'] is missing or empty
+            await interaction.followup.send("No war specified or invalid war data received.")
+            return
+        elif war_state == 'preparation':
+            await interaction.followup.send("War is preparing to start. There is no relevant stats listed yet.")
+            return
+
+        if war_state == 'inWar' or war_state == 'warEnded':
             start_time = format_datetime(war_data.get('startTime', 'N/A'))
             end_time = format_datetime(war_data.get('endTime', 'N/A'))
-            numofAttacks = war_data['teamSize'] * 3
-            war_info = (
-                f'```yaml\n'
-                f"**Current War Information**\n"
-                f"State: {war_data['state']}\n"
-                f"Start Time: {start_time}\n"
-                f"End Time: {end_time}\n"
-                f"War Size: {war_data['teamSize']}\n" 
-                f"Clan: {war_data['clan']['name']} (Tag: {war_data['clan']['tag']})\n" 
-                f"Opponent: {war_data['opponent']['name']} (Tag: {war_data['opponent']['tag']})\n" 
-                f"Clan Stars: {war_data['clan']['stars']} (Attacks: {war_data['clan']['attacks']}/{numofAttacks})\n" 
-                f"Opponent Stars: {war_data['opponent']['stars']} (Attacks: {war_data['opponent']['attacks']}/{numofAttacks})\n" 
-                f"Clan Destruction Percentage: {war_data['clan']['destructionPercentage']}%\n" 
-                f"Opponent Destruction Percentage: {war_data['opponent']['destructionPercentage']}%\n"
-                f"```\n"
+            numofAttacks = war_data['teamSize'] * 2
+            clan = war_data.get('clan', [])
+            members = clan.get('members', [])
+         #   members = war_data['clan']['members']
+          #  print(f"Members data: " + str(members))  # Debugging statement to see if the list is populated
 
-        )
-        if war_data['state'] == 'notInWar':
-            war_info = (
+            for member in members:
+                member_name = member.get('name')
+                th_lvl = member.get('townhallLevel')
+                position = member.get('mapPosition')
+                attacks = member.get('attacks',[])
+                print(f"Member Name: {member_name} {position} {attacks}")
+                total_stars =0
+                total_destruction =0
+                total_attacks = len(attacks) # Counter for the number of attacks
+
+                for attack in attacks:
+                    obtained_stars = attack.get('stars', 0) 
+                    destruction = attack.get('destructionPercentage', 0)
+                    total_stars += obtained_stars
+                    total_destruction += destruction
+                    
+                    
+                member_data = ({
+                    'name': member_name,
+                    'townhallLevel': th_lvl,
+                    'stars': total_stars,
+                    'destruction': total_destruction,
+                    'attacks': total_attacks
+                })
+
+                if total_attacks > 0:
+                    members_with_attacks.append(member_data)
+                else: 
+                    members_without_attacks.append(member_data)
+
+            # Sort by stars (descending) and destruction percentage (descending as a tiebreaker)
+        sorted_with_attacks = sorted(members_with_attacks, key=lambda x: (x['stars'], x['destruction']), reverse=True)
+        sorted_without_attacks = sorted(members_without_attacks, key=lambda x: (x['townhallLevel'], x['name']), reverse=True)
+
+        if war_state == 'inWar':
+            attackers_info = "```yaml\n**Members Who Already Attacked in Current War**\n"
+        elif war_state == 'warEnded':
+            attackers_info = "```yaml\n**Members Who Attacked in Most Recent War**\n"
+
+        for i,member in enumerate(sorted_with_attacks):
+            attackers_info += (f"{i+1}.{member['name']}: Stars: {member['stars']}, "
+                 f"Percentage: {member['destruction']}%, "
+                 f"Attacks: {member['attacks']}/2\n")
+        
+        attackers_info += "```"
+
+        if war_state == 'inWar':
+            soon_to_be_attackers = "```yaml\n**Members Who Haven't Attacked in Current War**\n"
+        if war_state == 'warEnded':
+            soon_to_be_attackers = "```yaml\n**Members Who Didn't Attack in Most Recent War**\n"
+
+        for i, member in enumerate(sorted_without_attacks):
+            soon_to_be_attackers += (f"{i + 1}. {member['name']}: THlvl: {member['townhallLevel']}, "
+            f"Attacks: {member['attacks']}/2\n")
+                 
+        soon_to_be_attackers +="```"
+        await interaction.followup.send(attackers_info)
+        await interaction.followup.send(soon_to_be_attackers)
+
+
+    elif war_state == 'notInWar':
+        war_info = (
                 f"```yaml\n"
                 f"**Current War Information**\n"
                 f"State: {war_data['state']}\n"
                 f"```\n"
-            )
+        )
 
         await interaction.followup.send(war_info)
+
     elif response.status_code == 404: 
         await interaction.followup.send("No current war found for the specified clan.")
     else:
         await interaction.followup.send(f"Error retrieving current war info: {response.status_code}, {response.text}")
+
 
 @bot.tree.command(name = "cwlcurrent", description = "Recieve information about current war")
 async def warInfo(interaction:discord.Interaction):
@@ -679,8 +990,9 @@ async def warInfo(interaction:discord.Interaction):
   #  print(f"Response status: {response.status_code}, Response text: {response.text}") # Debugging print statement
     if response.status_code == 200: 
         war_data = response.json() 
+        war_info = "No war information available."
 
-        if 'state' in war_data and war_data['state'] == 'inWar': 
+        if 'state' in war_data or war_data['state'] == 'inWar': 
             if 'clans' in war_data: 
                 clan_info = "\n".join([ f"Clan{i+1}: {clan['name']} (Tag: {clan['tag']})" 
                 for i, clan in enumerate(war_data['clans'])
@@ -696,14 +1008,23 @@ async def warInfo(interaction:discord.Interaction):
              
             else: 
                 war_info = ( 
-                f'```yaml\n' f"**Current War Information**\n" 
+                f'```yaml\n' f"** urrent War Information **\n" 
                 f"State: {war_data['state']}\n" 
                 f"No clans data available.\n" f"```\n" 
                 ) 
 
-        elif 'state' in war_data and war_data['state'] == 'notInWar': 
+        elif war_data['state'] == 'preparation':
             war_info = ( f'```yaml\n' 
-            f"**Current War Information**\n" 
+            f"** Current War Information **\n" 
+            f"State: {war_data['state']}\n" 
+            f"```\n"
+
+            )
+
+
+        elif 'state' in war_data == 'notInWar': 
+            war_info = ( f'```yaml\n' 
+            f"** Current War Information **\n" 
             f"State: {war_data['state']}\n" 
             f"```\n"
 
@@ -711,9 +1032,10 @@ async def warInfo(interaction:discord.Interaction):
             
         await interaction.followup.send(war_info)
     elif response.status_code == 404: 
-        await interaction.followup.send("No current war found for the specified clan.")
+        await interaction.followup.send("Currently not in CWL. ")
     else:
         await interaction.followup.send(f"Error retrieving current war info: {response.status_code}, {response.text}")
+        
 
 @bot.tree.command(name = "cwlclansearch", description = "Search up other clans in CWL")
 @app_commands.describe(clanname = "The clan's name")
