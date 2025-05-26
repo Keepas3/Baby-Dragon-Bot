@@ -17,10 +17,11 @@ import mysql.connector
 
 # Connect to MySQL Database
 conn = mysql.connector.connect(
-    host="localhost",
-    user="root",
-    password=os.getenv("MY_SQL_PASSWORD"),
-    database="babybot"
+    host=os.getenv("RAILWAY_TCP_PROXY_DOMAIN"),  # Use Railway's public TCP Proxy
+    user=os.getenv("MYSQLUSER"),
+    password=os.getenv("MYSQLPASSWORD"),
+    database=os.getenv("MYSQLDATABASE"),
+    port=os.getenv("RAILWAY_TCP_PROXY_PORT")  # Use Railway's external port
 )
 
 TOKEN = os.getenv('DISCORD_TOKEN2')
