@@ -17,11 +17,11 @@ import mysql.connector
 
 # Connect to MySQL Database
 conn = mysql.connector.connect(
-    host=os.getenv("RAILWAY_TCP_PROXY_DOMAIN"),  # Use Railway's public TCP Proxy
-    user=os.getenv("MYSQLUSER"),
-    password=os.getenv("MYSQLPASSWORD"),
-    database=os.getenv("MYSQLDATABASE"),
-    port=os.getenv("RAILWAY_TCP_PROXY_PORT")  # Use Railway's external port
+    host=os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "localhost"),  # Use Railway's public TCP Proxy
+    user=os.getenv("MYSQLUSER", "root"),
+    password=os.getenv("MYSQLPASSWORD", os.getenv("MY_SQL_PASSWORD")),
+    database=os.getenv("MYSQLDATABASE", os.getenv("MY_SQL_DATABASE2")),
+    port=os.getenv("RAILWAY_TCP_PROXY_PORT", "3306")  # Use Railway's external port
 )
 
 TOKEN = os.getenv('DISCORD_TOKEN2')
@@ -97,12 +97,6 @@ async def on_ready():
     print(f'Logged in as {bot.user}!')
 
 
-
-# @bot.tree.command(name="ping", description="Ping the bot")
-# async def ping(interaction: discord.Interaction):
-#     latency = round(bot.latency * 1000)
-#     ping_message = f"{latency} ms" 
-#     print(f"Sending ping: {ping_message}")  # Debugging print statement
 
 cursor = conn.cursor()
 
@@ -1577,7 +1571,12 @@ async def player_heroes(interaction: discord.Interaction, user: discord.Member =
         tag = player_data.get('tag')
 
         # Filter heroes (excluding builder base)
-        filtered_heroes = [hero for hero in player_data.get('heroes', []) if hero['village'] != 'builderBase']
+        if village.lower() == "home":
+            filtered_heroes = [hero for hero in player_data.get('heroes', []) if hero['village'] == "home"]
+        elif village.lower() == "builder":
+            filtered_heroes = [hero for hero in player_data.get('heroes', []) if hero['village'] == "builderBase"]
+        else:  # "both"
+            filtered_heroes = player_data.get('heroes', [])
         hero_details = "\n".join([
             f"**{hero['name']}**: Level {hero['level']}/{hero['maxLevel']} {'(MAXED)' if hero['level'] == hero['maxLevel'] else ''}"
             for hero in filtered_heroes
@@ -1591,25 +1590,29 @@ async def player_heroes(interaction: discord.Interaction, user: discord.Member =
             f"**{equip['name']}**: Level {equip['level']}/{equip['maxLevel']} {'(MAXED)' if equip['level'] == equip['maxLevel'] else ''}"
             for equip in filtered_equipment
         ])
-
-        # Create embed
-        embed = discord.Embed(
-            title=f"{name}'s Hero Stats",
-            description=f"**Tag:** `{tag}`",
-            color=0x3498db
-        )
-        
-        embed.add_field(name="🛡️ Hero Levels", value=hero_details if hero_details else "No heroes found.", inline=False)
-        embed.add_field(name="⚔️ Equipment Levels", value=equipment_details if equipment_details else "No equipment found.", inline=False)
-        file = discord.File("images/hero_updated.png", filename="hero_updated.png")
-        embed.set_image(url="attachment://hero_updated.png")
-
-        embed.set_footer(text=f"Requested by {interaction.user.name}")
-
-        await interaction.response.send_message(embed=embed)
-
+        if village.lower() == "home" or village.lower() == "both":
+            hero_information = (
+                f"```yaml\n"
+                f"Name: {name} \n"
+                f"Tag: {player_data['tag']}\n"
+                f"** Hero Levels **\n"
+                f"{hero_details}\n"
+                f"** Equipment Levels **\n"
+                f"{equipment_details}\n"
+                f"```\n"
+            )
+        else:
+            hero_information = (
+                f"```yaml\n"
+                f"Name: {name} \n"
+                f"Tag: {player_data['tag']}\n"
+                f"** Hero Levels **\n"
+                f"{hero_details}\n"
+                f"```\n"
+            )
+        await interaction.response.send_message(f'{hero_information}')
     else:
-        await interaction.response.send_message(f"Error fetching data: {response.status_code}, {response.text}", file= file)
+        await interaction.response.send_message(f'Error: {response.status_code}, {response.text}')
 
 @bot.tree.command(name = "playerequipments", description = "Get info on all of a player's equipments")
 @app_commands.describe(user= "Select a Discord User",player_tag = "The user's tag(optional)")
