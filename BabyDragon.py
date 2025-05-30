@@ -1390,17 +1390,23 @@ async def CWL_clan_search(interaction: discord.Interaction, clanname: str):
 
 
 @bot.tree.command(name="playerinfo", description="Get player's general information")
-async def player_info(interaction: discord.Interaction, user: discord.Member, player_tag: str = None):
+@app_commands.describe(user="Select a Discord user", player_tag="The user's tag (optional)")
+async def player_info(interaction: discord.Interaction, user: discord.Member = None, player_tag: str = None):
     """Fetches player info by Discord user first, then falls back to player tag if needed."""
 
-    # Check the database for the selected user's linked player tag
-    cursor.execute("SELECT player_tag FROM players WHERE discord_id = %s AND guild_id = %s", (user.id, interaction.guild.id))
-    result = cursor.fetchone()
+    if user:
+        cursor.execute("SELECT player_tag FROM players WHERE discord_id = %s AND guild_id = %s", (user.id, interaction.guild.id))
+        result = cursor.fetchone()
 
-    if result and result[0]:  # If a player tag is found, use it
-        player_tag = result[0]
-    elif not player_tag:  # If no player tag is found and none was provided, return an error
-        await interaction.response.send_message(f"{user.mention} has not linked a Clash of Clans account. Please provide a player tag manually.")
+        if result and result[0]:  # If a player tag is found, use it
+            player_tag = result[0]
+        else:
+            await interaction.response.send_message(f"{user.mention} has not linked a Clash of Clans account. Please provide a player tag manually.")
+            return
+
+    # If no player tag is provided, return an error
+    if not player_tag:
+        await interaction.response.send_message("Please provide a player tag or mention a user who has linked their account.")
         return
 
     # Format player tag for API request
