@@ -16,13 +16,32 @@ import mysql.connector
 
 
 # Connect to MySQL Database
-conn = mysql.connector.connect(
-    host=os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "localhost"),  # Use Railway's public TCP Proxy
-    user=os.getenv("MYSQLUSER", "root"),
-    password=os.getenv("MYSQLPASSWORD", os.getenv("MY_SQL_PASSWORD")),
-    database=os.getenv("MYSQLDATABASE", os.getenv("MY_SQL_DATABASE2")),
-    port=os.getenv("RAILWAY_TCP_PROXY_PORT", "3306")  # Use Railway's external port
-)
+def connect_db():
+    """Establish a new MySQL connection."""
+    return mysql.connector.connect(
+        host=os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "localhost"),
+        user=os.getenv("MYSQLUSER", "bryan"),
+        password=os.getenv("MYSQLPASSWORD", os.getenv("MY_SQL_PASSWORD")),
+        database=os.getenv("MYSQLDATABASE", os.getenv("MY_SQL_DATABASE2")),
+        port=os.getenv("RAILWAY_TCP_PROXY_PORT", "3306"),
+        autocommit=True
+    )
+
+def get_db_connection():
+    """Ensures the MySQL connection is active and reconnects if needed."""
+    global db_connection, cursor
+
+    try:
+        if not db_connection.is_connected():
+            db_connection.reconnect(attempts=3, delay=2)
+            cursor = db_connection.cursor()  # ✅ Refresh cursor after reconnecting
+    except mysql.connector.Error:
+        db_connection = connect_db()
+        cursor = db_connection.cursor()
+
+    return cursor
+
+
 
 TOKEN = os.getenv('DISCORD_TOKEN2')
 api_key = os.getenv('COC_api_key')
@@ -98,30 +117,32 @@ async def on_ready():
 
 
 
-cursor = conn.cursor()
 
-# cursor.execute("INSERT INTO servers (guild_id, guild_name) VALUES (%s, %s)", ("123456789", "Test Server"))
-# conn.commit()
 
 cursor.execute("SELECT * FROM servers")
 result = cursor.fetchall()
 print(result)  # Should return stored server data
 def get_clan_tag(guild_id):
     """Retrieve the clan tag for a given Discord server."""
+    cursor = get_db_connection()  # 
+    
     cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
     result = cursor.fetchone()
     
-    if result and result[0]:  # Ensure there's a valid clan tag
-        return result[0]
-    else:
-        return None  # Return None if no clan tag is set
+    return result[0] if result and result[0] else None  # ✅ Cleaner return statement
+    
 @bot.event
 async def on_guild_join(guild):
     """Automatically adds the guild_id to the database when bot joins a server."""
-    cursor.execute("INSERT INTO servers (guild_id, guild_name) VALUES (%s, %s) ON DUPLICATE KEY UPDATE guild_name = VALUES(guild_name)", (str(guild.id), guild.name))
-    conn.commit()
+    cursor = get_db_connection()  # ✅ Ensure connection is active
+    
+    cursor.execute(
+        "INSERT INTO servers (guild_id, guild_name) VALUES (%s, %s) ON DUPLICATE KEY UPDATE guild_name = VALUES(guild_name)",
+        (str(guild.id), guild.name)
+    )
+    db_connection.commit()
+
     print(f"Added {guild.name} ({guild.id}) to the database.")
- 
 
 
 
@@ -207,6 +228,7 @@ async def flip(interaction: discord.Interaction):
 @bot.tree.command(name="botstatus", description="Get the server status")
 async def server_status(interaction: discord.Interaction):
     """Fetches the server's clan tag and all linked Discord usernames."""
+    cursor = get_db_connection() 
     
     guild_id = interaction.guild.id  # Get current server ID
     server_count = len(bot.guilds)  # Get the number of servers the bot is in
@@ -241,27 +263,30 @@ async def server_status(interaction: discord.Interaction):
 
 @bot.tree.command(name='setclantag', description="Set the clan tag for this server")
 async def set_clan_tag(interaction: discord.Interaction, new_tag: str):
-    """Updates the clan tag in the database and changes the bot's nickname."""
+    global db_connection, cursor
+    cursor = get_db_connection()  # Get an active cursor—this ensures reconnect if needed
+    global clan_tag
+
     guild_id = interaction.guild.id  # Get current server ID
 
     if check_coc_clan_tag(new_tag.replace('#', '%23')):  # Validate the tag
-        # Update the database
+        clan_tag = new_tag.replace('#', '%23')  # Format the clan tag for the API request
+       # og_clan_tag = new_tag  # Store the original clan tag for display
         cursor.execute("UPDATE servers SET clan_tag = %s WHERE guild_id = %s", (new_tag, guild_id))
-        conn.commit()
-
-        # Change the bot's nickname
-        # await interaction.guild.me.edit(nick=f"{bot.user.name} | {new_tag}")
+        db_connection.commit()  # Use db_connection.commit() instead of conn.commit()
         
+        # Optionally, update the bot's nickname here if needed.
         await interaction.response.send_message(f'Clan tag has been updated to {new_tag} for this server!')
     else:
-        await interaction.response.send_message(f"Not a valid Clan ID")
+        await interaction.response.send_message("Not a valid Clan ID")
                   
           
 @bot.tree.command(name='link', description="Link your Clash of Clans account to your Discord account")
 async def link(interaction: discord.Interaction, player_tag: str):
     """Links a Clash of Clans account to the player's Discord ID and current server."""
     # player_tag = player_tag.replace('#', '%23')
-
+    global db_connection, cursor
+    cursor = get_db_connection()  # Get an active cursor—this ensures reconnect if needed
     discord_id = interaction.user.id # Get Discord ID of user
     discord_username = interaction.user.name
 
@@ -276,7 +301,7 @@ async def link(interaction: discord.Interaction, player_tag: str):
             ON DUPLICATE KEY UPDATE player_tag = VALUES(player_tag), discord_username = VALUES(discord_username), guild_name = VALUES(guild_name)
         """, (discord_id, discord_username, guild_id, guild_name, player_tag))
 
-        conn.commit()
+        db_connection.commit()
         await interaction.response.send_message(f"Your Clash of Clans account with tag {player_tag} has been linked to your Discord account in this server.")
 
     else:
@@ -285,7 +310,8 @@ async def link(interaction: discord.Interaction, player_tag: str):
 @bot.tree.command(name='unlink', description="Unlink your Clash of Clans account from your Discord account")
 async def unlink(interaction: discord.Interaction):
     """Removes the player's linked Clash of Clans account from the database."""
-    
+    global db_connection, cursor
+    cursor = get_db_connection()  
     discord_id = interaction.user.id  # Get Discord ID of user
     guild_id = interaction.guild.id  # Get current server ID
 
@@ -299,7 +325,7 @@ async def unlink(interaction: discord.Interaction):
 
     # Remove the linked account from the database
     cursor.execute("DELETE FROM players WHERE discord_id = %s AND guild_id = %s", (discord_id, guild_id))
-    conn.commit()
+    db_connection.commit()
 
     await interaction.response.send_message("Your Clash of Clans account has been successfully unlinked.")
 
@@ -309,6 +335,7 @@ async def unlink(interaction: discord.Interaction):
 @app_commands.describe(ranking= "List by trophies(default), TH, role, tag")
 async def clan_members(interaction: discord.Interaction, ranking: str = "TROPHIES"): 
     # Get the clan tag from the database for the current server
+    cursor = get_db_connection()
     guild_id = interaction.guild.id
     cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
     result = cursor.fetchone()
@@ -440,6 +467,7 @@ max_members: int = None, minclan_level: int = None , limits: int=1
 @bot.tree.command(name="lookupmember", description="Get Information about a clan member")
 @app_commands.describe(user = "Select a Discord User", username = "A clan member's name(optional)")
 async def user_info(interaction: discord.Interaction, user: discord.Member = None, username: str = None):
+    cursor = get_db_connection()
     if user:
         cursor.execute("SELECT player_tag FROM players WHERE discord_id = %s AND guild_id = %s", (user.id, interaction.guild.id))
         result = cursor.fetchone()
@@ -511,6 +539,7 @@ async def user_info(interaction: discord.Interaction, user: discord.Member = Non
 
 @bot.tree.command(name="claninfo", description="Retrieve information about the clan")
 async def clanInfo(interaction: discord.Interaction):
+    cursor = get_db_connection()
     guild_id = interaction.guild.id
     cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
     result = cursor.fetchone()
@@ -575,6 +604,7 @@ async def clanInfo(interaction: discord.Interaction):
 
 @bot.tree.command(name="capitalraid", description="Retrieve information about info on current raid for clan")
 async def capitalraid(interaction: discord.Interaction):
+    cursor = get_db_connection()
     guild_id = interaction.guild.id
     cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
     result = cursor.fetchone()
@@ -732,6 +762,7 @@ async def capitalraid(interaction: discord.Interaction):
 @bot.tree.command(name="previousraids", description="Retrieve information about capital raid seasons for the clan")
 @app_commands.describe(limit="The number of raids to retrieve (default:2, max:5)")
 async def previous_raids(interaction: discord.Interaction, limit: int = 2):
+    cursor = get_db_connection()
     guild_id = interaction.guild.id
     cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
     result = cursor.fetchone()
@@ -806,6 +837,7 @@ async def previous_raids(interaction: discord.Interaction, limit: int = 2):
 @bot.tree.command(name="warlog", description="Retrieve the war log for the specified clan")
 @app_commands.describe(limit="The number of wars to retrieve (default 1, max 8)")
 async def warLog(interaction: discord.Interaction, limit: int = 1):
+    cursor = get_db_connection()
     guild_id = interaction.guild.id
     cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,)) 
     result = cursor.fetchone()
@@ -908,6 +940,7 @@ async def warLog(interaction: discord.Interaction, limit: int = 1):
 
 @bot.tree.command(name="currentwar", description="Receive general information about current war")
 async def warInfo(interaction: discord.Interaction):
+    cursor = get_db_connection()
     guild_id = interaction.guild.id
     cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
     result = cursor.fetchone()
@@ -1022,6 +1055,7 @@ async def warInfo(interaction: discord.Interaction):
 
 @bot.tree.command(name = "currentwarstats", description = "Recieve player's information about current war")
 async def warInfo(interaction:discord.Interaction):
+    cursor = get_db_connection()
     guild_id = interaction.guild.id
     cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
     result = cursor.fetchone()
@@ -1143,19 +1177,11 @@ async def warInfo(interaction:discord.Interaction):
 
 
 
-@bot.tree.command(name="cwlcurrent", description="Receive information about the current CWL and its rosters")
+clan_tag = '#2QQ2VCU82'.replace('#','%23')
+@bot.tree.command(name="cwlcurrent", description="Receive information about the current war")
 async def warInfo(interaction: discord.Interaction):
-    guild_id = interaction.guild.id
-    cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
-    result = cursor.fetchone()
-
-    if not result or not result[0]:
-        await interaction.response.send_message("No clan tag is set for this server. Please set a clan tag using /setclantag.")
-        return
-    
-    clan_tag = result[0].replace('#', '%23')  # Format the clan tag for the API request
-    await interaction.response.defer()  # Defer interaction to allow time for processing
-
+    await interaction.response.defer()  # Allow time for processing
+    cursor = get_db_connection()
     if not api_key:
         raise ValueError("API KEY NOT FOUND")
 
@@ -1165,51 +1191,66 @@ async def warInfo(interaction: discord.Interaction):
 
     if response.status_code == 200: 
         war_data = response.json()
-        rounds = war_data.get('rounds', [])
- 
+        rounds = war_data.get('rounds', [])  # Retrieve CWL rounds
 
-        clan_info_list = []  # Stores clans with correct war tags
+        clan_info_list = []  # Store clans with correct war tags
 
-        for i, clan in enumerate(war_data.get('clans', [])):  # Ensure all 8 clans are processed
-            correct_war_tag = None  # Initialize war tag as None
+        # ✅ Store all clans except your own BEFORE processing rounds
+        clan_list = [
+            {"name": clan.get("name", "Unknown"), "tag": clan.get("tag", "Unknown")}
+            for clan in war_data.get("clans", [])
+            if clan.get("tag") != clan_tag  # Ignore own clan
+        ]
 
-    # Make sure there are rounds and war tags available
-            if i < len(rounds):
-                war_tags = rounds[i].get('warTags', [])  # Get war tags for the corresponding round
-                war_tags = [tag.replace('#', '%23') for tag in war_tags]  # Sanitize war tags
+        missing_clan_index = 0  # ✅ Track which clan to use for missing opponents
 
-                for war_tag in war_tags:  # Loop through war tags
-                    war_url = f'https://api.clashofclans.com/v1/clanwarleagues/wars/{war_tag}'
-                    war_response = requests.get(war_url, headers=headers)
+        for i in range(len(rounds)):  
+            war_tags = rounds[i].get("warTags", [])  
+            war_tags = [tag.replace("#", "%23") for tag in war_tags]  
 
-                    if war_response.status_code == 200:
-                        war_details = war_response.json()
+            opponent_name = "Unknown"
+            opponent_tag = "Unknown"
+            correct_war_tag = None  
 
+            for war_tag in war_tags:  
+                war_url = f"https://api.clashofclans.com/v1/clanwarleagues/wars/{war_tag}"
+                war_response = requests.get(war_url, headers=headers)
 
-                        war_clan_tag = war_details.get('clan', {}).get('tag', 'Unknown')
-                        opponent_tag = war_details.get('opponent', {}).get('tag', 'Unknown')
-                    # war_state = war_details.get('state', 'N/A')
+                if war_response.status_code == 200:
+                    war_details = war_response.json()
 
-            
-                        if war_clan_tag == og_clan_tag or opponent_tag == og_clan_tag:
-                           # war_tag = war_tag.replace('%23', '#')
-                            correct_war_tag = war_tag  # Assign the matching war tag
-                            break  # Stop searching after finding a valid war tag
+                    war_clan_tag = war_details.get("clan", {}).get("tag", "Unknown")
+                    opponent_tag = war_details.get("opponent", {}).get("tag", "Unknown")
+                    opponent_name = war_details.get("opponent", {}).get("name", "Unknown")
 
-    # Add clan info with corresponding war tag,
+                    # ✅ Match our own clan and extract opponent correctly
+                    if war_clan_tag == clan_tag or opponent_tag == clan_tag:
+                        correct_war_tag = war_tag
+                        if opponent_tag == clan_tag:
+                            opponent_name = war_details.get("clan", {}).get("name", "Unknown")
+                            opponent_tag = war_clan_tag
+                        break  
+
+            # ✅ If opponent name/tag is still "Unknown", cycle through `clan_list`
+            if opponent_name == "Unknown" or opponent_tag == "Unknown":
+                if missing_clan_index < len(clan_list):  # Ensure we don't exceed list length
+                    opponent_name, opponent_tag = clan_list[missing_clan_index]["name"], clan_list[missing_clan_index]["tag"]
+                    missing_clan_index += 1  # ✅ Move to the next clan for the next missing entry
+
+            # ✅ Append correct round data, ensuring missing data is filled
             clan_info_list.append(
-                f"Clan {i+1}: {clan['name']} (Tag: {clan['tag']}) - War Tag: {correct_war_tag or 'No valid war tag'}"
-        )
+                f"Round {i+1}: {opponent_name} (Tag: {opponent_tag}) - War Tag: {(correct_war_tag or 'No war tag').replace('%23', '#')}"
+            )
 
-        # Format response with both clan details and war info
+        # Format response with YAML structure
         war_info = (
             f'```yaml\n'
             f"**Current CWL War Information**\n"
             f"State: {war_data.get('state', 'Unknown')}\n"
             f"Season: {war_data.get('season', 'Unknown')}\n"
-            f"{chr(10).join(clan_info_list)}\n"
-            f"```\n"
+            f"Rounds:\n" + "\n".join(f"{info}" for info in clan_info_list) + f"\n```\n"
         )
+
         await interaction.followup.send(war_info)
 
     elif response.status_code == 404:
@@ -1221,6 +1262,7 @@ async def warInfo(interaction: discord.Interaction):
 @bot.tree.command(name="cwlspecificwars", description="Receive general information about current war")
 @app_commands.describe(war_tag = "The specific war tag for individual CWL War")
 async def warInfo(interaction: discord.Interaction, war_tag: str):
+    cursor = get_db_connection()
     guild_id = interaction.guild.id
     cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
     result = cursor.fetchone()
@@ -1264,14 +1306,14 @@ async def warInfo(interaction: discord.Interaction, war_tag: str):
             embed = Embed(
                 title=f"{war_data['clan']['name']} vs {war_data['opponent']['name']}",
                 description=f"State: {war_data['state'].capitalize()}\n Last Updated: <t:{timestamp}:R>",
-                color=0x00ff00 if  cwl_clan_tag == og_clan_tag and clan_stars > opp_stars 
-                else 0x00ff00 if  cwl_opp_tag == og_clan_tag and clan_stars < opp_stars 
-                else 0xFFFF00 if  cwl_opp_tag == og_clan_tag and clan_stars == opp_stars 
+                color=0x00ff00 if  cwl_clan_tag == clan_tag and clan_stars > opp_stars 
+                else 0x00ff00 if  cwl_opp_tag == clan_tag and clan_stars < opp_stars 
+                else 0xFFFF00 if  cwl_opp_tag == clan_tag and clan_stars == opp_stars 
                 else 0x808080  # Green for winning  wars, red is for losing  wars, yellow for ties,  Gray for unknown results
             )
-            if cwl_clan_tag == og_clan_tag: 
+            if cwl_clan_tag == clan_tag: 
                 embed.set_thumbnail(url=war_data['clan']['badgeUrls']['small'])
-            elif cwl_opp_tag == og_clan_tag:
+            elif cwl_opp_tag == clan_tag:
                 embed.set_thumbnail(url= war_data['opponent']['badgeUrls']['small'])
 
             embed.add_field(name="Start Time", value=start_time, inline=True)
@@ -1340,6 +1382,7 @@ async def warInfo(interaction: discord.Interaction, war_tag: str):
 @bot.tree.command(name = "cwlclansearch", description = "Search up other clans in CWL")
 @app_commands.describe(clanname = "The clan's name")
 async def CWL_clan_search(interaction: discord.Interaction, clanname: str):
+    cursor = get_db_connection()
     guild_id = interaction.guild.id
     cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
     result = cursor.fetchone()
@@ -1392,6 +1435,7 @@ async def CWL_clan_search(interaction: discord.Interaction, clanname: str):
 @bot.tree.command(name="playerinfo", description="Get player's general information")
 @app_commands.describe(user="Select a Discord user", player_tag="The user's tag (optional)")
 async def player_info(interaction: discord.Interaction, user: discord.Member = None, player_tag: str = None):
+    cursor = get_db_connection()
     """Fetches player info by Discord user first, then falls back to player tag if needed."""
 
     if user:
@@ -1479,7 +1523,7 @@ async def player_info(interaction: discord.Interaction, user: discord.Member = N
 @app_commands.describe(user="Select a Discord user", player_tag="The user's tag (optional)", village="The type of village: home(default), builder or both")
 async def player_troops(interaction: discord.Interaction, user: discord.Member = None, player_tag: str = None, village: str = "home"):
     """Fetches troop levels by Discord user first, then falls back to player tag if needed."""
-
+    cursor = get_db_connection()
     # If a Discord user is provided, check the database for their player tag
     if user:
         cursor.execute("SELECT player_tag FROM players WHERE discord_id = %s AND guild_id = %s", (user.id, interaction.guild.id))
@@ -1549,6 +1593,7 @@ async def player_troops(interaction: discord.Interaction, user: discord.Member =
 @bot.tree.command(name="playerheroes", description="Get a player's heroes/equipments")
 @app_commands.describe(user="Select a Discord user", player_tag="The user's tag (optional)", village="The type of village: home(default), builder or both")
 async def player_heroes(interaction: discord.Interaction, user: discord.Member = None, player_tag: str = None, village: str = "home"):
+    cursor = get_db_connection()
     if user:
         cursor.execute("SELECT player_tag FROM players WHERE discord_id = %s AND guild_id = %s", (user.id, interaction.guild.id))
         result = cursor.fetchone()
@@ -1623,7 +1668,7 @@ async def player_heroes(interaction: discord.Interaction, user: discord.Member =
 @bot.tree.command(name = "playerequipments", description = "Get info on all of a player's equipments")
 @app_commands.describe(user= "Select a Discord User",player_tag = "The user's tag(optional)")
 async def player_equips(interaction: discord.Interaction, user: discord.Member = None, player_tag: str = None):
-
+    cursor = get_db_connection()
     if user:
         cursor.execute("SELECT player_tag FROM players WHERE discord_id = %s AND guild_id = %s", (user.id, interaction.guild.id))
         result = cursor.fetchone()
@@ -1681,7 +1726,7 @@ Tag: {player_data['tag']}
 @bot.tree.command(name = "playerspells", description = "Get player's spell levels")
 @app_commands.describe(user = "Select a Discord User", player_tag = "The user's tag (optional)")
 async def player_spells(interaction: discord.Interaction, user: discord.Member= None, player_tag: str = None):
-
+    cursor = get_db_connection()
     if user:
         cursor.execute("SELECT player_tag FROM players WHERE discord_id = %s AND guild_id = %s", (user.id, interaction.guild.id))
         result = cursor.fetchone()
