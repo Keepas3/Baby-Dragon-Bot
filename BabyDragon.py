@@ -15,12 +15,16 @@ from PIL import Image, ImageDraw, ImageFont
 import mysql.connector
 
 
+
+db_connection = None
+cursor = None
+
 # Connect to MySQL Database
 def connect_db():
     """Establish a new MySQL connection."""
     return mysql.connector.connect(
         host=os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "localhost"),
-        user=os.getenv("MYSQLUSER", "bryan"),
+        user=os.getenv("MYSQLUSER", "root"),
         password=os.getenv("MYSQLPASSWORD", os.getenv("MY_SQL_PASSWORD")),
         database=os.getenv("MYSQLDATABASE", os.getenv("MY_SQL_DATABASE2")),
         port=os.getenv("RAILWAY_TCP_PROXY_PORT", "3306"),
@@ -29,24 +33,30 @@ def connect_db():
 
 def get_db_connection():
     """Ensures the MySQL connection is active and reconnects if needed."""
-    global db_connection, cursor
+    global db_connection, cursor  # ✅ Declare global variables
+
+    if db_connection is None:  # ✅ Ensure db_connection is initialized
+        db_connection = connect_db()
+        cursor = db_connection.cursor()
+        return cursor
 
     try:
         if not db_connection.is_connected():
             db_connection.reconnect(attempts=3, delay=2)
             cursor = db_connection.cursor()  # ✅ Refresh cursor after reconnecting
     except mysql.connector.Error:
-        db_connection = connect_db()
+        db_connection = connect_db()  # ✅ Create a new connection if reconnect fails
         cursor = db_connection.cursor()
 
     return cursor
 
 
 
+
 TOKEN = os.getenv('DISCORD_TOKEN2')
 api_key = os.getenv('COC_api_key')
-clan_tag = '#2QQ2VCU82'.replace('#', '%23')
-og_clan_tag = '#2QQ2VCU82'
+# clan_tag = '#2QQ2VCU82'.replace('#', '%23')
+# og_clan_tag = '#2QQ2VCU82'
 
 
 intents = discord.Intents.default()
@@ -103,7 +113,7 @@ async def on_ready():
     """Fetch clan tags dynamically"""
     await bot.tree.sync()  # Sync commands globally
     await bot.change_presence(activity=discord.Game(name='With Fire'))
-
+    cursor = get_db_connection()  # Get an active cursor—this ensures reconnect if needed   
     for guild in bot.guilds:
         cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild.id,))
         result = cursor.fetchone()
@@ -119,9 +129,9 @@ async def on_ready():
 
 
 
-cursor.execute("SELECT * FROM servers")
-result = cursor.fetchall()
-print(result)  # Should return stored server data
+# cursor.execute("SELECT * FROM servers")
+# result = cursor.fetchall()
+# print(result)  # Should return stored server data
 def get_clan_tag(guild_id):
     """Retrieve the clan tag for a given Discord server."""
     cursor = get_db_connection()  # 
@@ -1177,11 +1187,23 @@ async def warInfo(interaction:discord.Interaction):
 
 
 
-clan_tag = '#2QQ2VCU82'.replace('#','%23')
+#clan_tag = '#2QQ2VCU82'.replace('#','%23')
 @bot.tree.command(name="cwlcurrent", description="Receive information about the current war")
 async def warInfo(interaction: discord.Interaction):
-    await interaction.response.defer()  # Allow time for processing
+
     cursor = get_db_connection()
+    guild_id = interaction.guild.id
+    cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
+    result = cursor.fetchone()
+
+    if not result or not result[0]:
+        await interaction.response.send_message("No clan tag is set for this server. Please set a clan tag using /setclantag.")
+        return
+    
+    clan_tag = result[0].replace('#', '%23')  # Format the clan tag for the API request
+    og_clan_tag = result[0]  # Store original clan tag for later use
+    await interaction.response.defer() # Defer the interaction to allow time for processing 
+
     if not api_key:
         raise ValueError("API KEY NOT FOUND")
 
@@ -1199,11 +1221,13 @@ async def warInfo(interaction: discord.Interaction):
         clan_list = [
             {"name": clan.get("name", "Unknown"), "tag": clan.get("tag", "Unknown")}
             for clan in war_data.get("clans", [])
-            if clan.get("tag") != clan_tag  # Ignore own clan
+            if clan.get("tag") != og_clan_tag  # Ignore own clan
         ]
+        print(clan_list)
 
         missing_clan_index = 0  # ✅ Track which clan to use for missing opponents
 
+        # Within your loop for each round:
         for i in range(len(rounds)):  
             war_tags = rounds[i].get("warTags", [])  
             war_tags = [tag.replace("#", "%23") for tag in war_tags]  
@@ -1212,35 +1236,43 @@ async def warInfo(interaction: discord.Interaction):
             opponent_tag = "Unknown"
             correct_war_tag = None  
 
+            # Check through all war_tags for a valid opponent
             for war_tag in war_tags:  
                 war_url = f"https://api.clashofclans.com/v1/clanwarleagues/wars/{war_tag}"
                 war_response = requests.get(war_url, headers=headers)
 
                 if war_response.status_code == 200:
                     war_details = war_response.json()
-
                     war_clan_tag = war_details.get("clan", {}).get("tag", "Unknown")
-                    opponent_tag = war_details.get("opponent", {}).get("tag", "Unknown")
-                    opponent_name = war_details.get("opponent", {}).get("name", "Unknown")
+                    opp_tag = war_details.get("opponent", {}).get("tag", "Unknown")
+                    opp_name = war_details.get("opponent", {}).get("name", "Unknown")
 
-                    # ✅ Match our own clan and extract opponent correctly
-                    if war_clan_tag == clan_tag or opponent_tag == clan_tag:
+                    # If our own clan is found (either as clan or opponent), use the opposing data
+                    if war_clan_tag == og_clan_tag or opp_tag == og_clan_tag:
                         correct_war_tag = war_tag
-                        if opponent_tag == clan_tag:
-                            opponent_name = war_details.get("clan", {}).get("name", "Unknown")
-                            opponent_tag = war_clan_tag
+                        if opp_tag == og_clan_tag:
+                            # Swap so that the opponent info actually becomes our enemy
+                            opp_name = war_details.get("clan", {}).get("name", "Unknown")
+                            opp_tag = war_clan_tag
+                        opponent_name, opponent_tag = opp_name, opp_tag
                         break  
 
-            # ✅ If opponent name/tag is still "Unknown", cycle through `clan_list`
+            # If we didn't get a valid opponent from the API, fall back to the clan_list.
             if opponent_name == "Unknown" or opponent_tag == "Unknown":
-                if missing_clan_index < len(clan_list):  # Ensure we don't exceed list length
-                    opponent_name, opponent_tag = clan_list[missing_clan_index]["name"], clan_list[missing_clan_index]["tag"]
-                    missing_clan_index += 1  # ✅ Move to the next clan for the next missing entry
+                if clan_list:  # If there is at least one fallback clan left,
+                    fallback = clan_list.pop(0)  # pop it (thus removing it from the list)
+                    opponent_name, opponent_tag = fallback["name"], fallback["tag"]
 
-            # ✅ Append correct round data, ensuring missing data is filled
+            # Otherwise, if we did get a valid opponent from the API,
+            # we remove all instances of that clan from the fallback list.
+            else:
+                clan_list = [clan for clan in clan_list if clan["tag"] != opponent_tag]
+
+            # Append round information
             clan_info_list.append(
                 f"Round {i+1}: {opponent_name} (Tag: {opponent_tag}) - War Tag: {(correct_war_tag or 'No war tag').replace('%23', '#')}"
             )
+
 
         # Format response with YAML structure
         war_info = (
