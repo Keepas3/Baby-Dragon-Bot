@@ -13,6 +13,7 @@ import random
 import time
 from PIL import Image, ImageDraw, ImageFont
 import mysql.connector
+import re
 
 
 
@@ -66,14 +67,6 @@ intents.presences = True
 
 bot = commands.Bot(command_prefix = "!", intents= intents)
 
-def check_coc_player_tag(player_tag): 
-    url = f'https://api.clashofclans.com/v1/players/{player_tag}' 
-    headers = { 'Authorization': f'Bearer {api_key}', 'Accept': 'application/json' }
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        return True
-    elif response.status_code == 404:
-        return False
 
 def format_datetime(dt_str):
     if not dt_str:
@@ -106,6 +99,36 @@ def check_coc_clan_tag(clan_tag):
         return True # Valid clan tag 
     elif response.status_code == 404: 
         return False
+
+def check_coc_player_tag(player_tag): 
+    url = f'https://api.clashofclans.com/v1/players/{player_tag}' 
+    headers = { 'Authorization': f'Bearer {api_key}', 'Accept': 'application/json' }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return True
+    elif response.status_code == 404:
+        return False
+
+def get_player_data(player_tag: str) -> dict:
+    # Ensure API key exists
+    if not api_key:
+        raise ValueError("API KEY NOT FOUND")
+
+    # Fetch player data from Clash of Clans API
+    url = f'https://api.clashofclans.com/v1/players/{player_tag}'
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Accept': 'application/json'
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        try:
+            reason = response.json().get("reason", response.text)
+        except Exception:
+            reason = response.text
+        raise RuntimeError(f"Clash API Error ({response.status_code}): {reason}")
+    return response.json()
+
 
 
 @bot.event
@@ -285,7 +308,6 @@ async def set_clan_tag(interaction: discord.Interaction, new_tag: str):
         cursor.execute("UPDATE servers SET clan_tag = %s WHERE guild_id = %s", (new_tag, guild_id))
         db_connection.commit()  # Use db_connection.commit() instead of conn.commit()
         
-        # Optionally, update the bot's nickname here if needed.
         await interaction.response.send_message(f'Clan tag has been updated to {new_tag} for this server!')
     else:
         await interaction.response.send_message("Not a valid Clan ID")
@@ -957,8 +979,7 @@ async def warInfo(interaction: discord.Interaction):
 
     if not result or not result[0]:
         await interaction.response.send_message("No clan tag is set for this server. Please set a clan tag using /setclantag.")
-        return
-    
+        return 
     clan_tag = result[0].replace('#', '%23')  # Format the clan tag for the API request
     await interaction.response.defer()  # Defer the interaction to allow time for processing
 
@@ -1063,232 +1084,257 @@ async def warInfo(interaction: discord.Interaction):
         await interaction.followup.send(f"Error retrieving current war info: {response.status_code}, {response.text}")
 
 
-@bot.tree.command(name = "currentwarstats", description = "Recieve player's information about current war")
-async def warInfo(interaction:discord.Interaction):
-    cursor = get_db_connection()
+@bot.tree.command(name="currentwarstats", description="Receive player stats for your current war or a CWL war by warTag")
+@app_commands.describe(wartag="(Optional) CWL war tag (e.g. #8LC8U2VP2). If omitted, shows your clan’s current normal war.")
+async def warInfo(interaction: discord.Interaction, wartag: str = None):
+    # 1) Defer to buy time
+    await interaction.response.defer()
+
+    # 2) Load headers
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept":        "application/json"
+    }
+
+    # 3) Fetch your clan tag from the DB
+    cursor   = get_db_connection()
     guild_id = interaction.guild.id
-    cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
-    result = cursor.fetchone()
-
-    if not result or not result[0]:
-        await interaction.response.send_message("No clan tag is set for this server. Please set a clan tag using /setclantag.")
-        return
-    
-    clan_tag = result[0].replace('#', '%23')  # Format the clan tag for the API request
-    await interaction.response.defer() # Defer the interaction to allow time for processing 
-    
-    if not api_key:
-        raise ValueError("API KEY NOT FOUND")
-    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}/currentwar' 
-    headers = { 'Authorization': f'Bearer {api_key}', 
-    'Accept': 'application/json' 
-    } 
-    response = requests.get(url, headers=headers) 
-   # print(f"Response status: {response.status_code}, Response text: {response.text}") # Debugging print statement
-    if response.status_code == 200: 
-        war_data = response.json() 
-        war_state = war_data['state']
-        print(war_state)
-        members_with_attacks = []
-        members_without_attacks = []
-       
-
-        if not war_data or 'state' not in war_data or not war_data['state']:
-            # Handle the case where war_data['state'] is missing or empty
-            await interaction.followup.send("No war specified or invalid war data received.")
-            return
-        elif war_state == 'preparation':
-            await interaction.followup.send("War is preparing to start. There is no relevant stats listed yet.")
-            return
-        
-        elif war_state == 'notInWar':
-            war_info = (
-                f"```yaml\n"
-                f"**Current War Information**\n"
-                f"State: {war_data['state']}\n"
-                f"```\n"
+    cursor.execute(
+        "SELECT clan_tag FROM servers WHERE guild_id = %s",
+        (guild_id,)
+    )
+    row = cursor.fetchone()
+    if not row or not row[0]:
+        return await interaction.followup.send(
+            "No clan tag is set for this server. Use `/setclantag` first.",
+            ephemeral=True
         )
-            await interaction.followup.send(war_info)
-            return
+    db_tag = row[0].strip().lstrip("#").upper()
+    enc_db = db_tag.replace("#", "%23")
 
-        if war_state == 'inWar' or war_state == 'warEnded':
-            start_time = format_datetime(war_data.get('startTime', 'N/A'))
-            end_time = format_datetime(war_data.get('endTime', 'N/A'))
-            numofAttacks = war_data['teamSize'] * 2
-            clan = war_data.get('clan', [])
-            members = clan.get('members', [])
-         #   members = war_data['clan']['members']
-          #  print(f"Members data: " + str(members))  # Debugging statement to see if the list is populated
-
-            for member in members:
-                member_name = member.get('name')
-                th_lvl = member.get('townhallLevel')
-                position = member.get('mapPosition')
-                attacks = member.get('attacks',[])
-               # print(f"Member Name: {member_name} {position} {attacks}")
-                total_stars =0
-                total_destruction =0
-                total_attacks = len(attacks) # Counter for the number of attacks
-
-                for attack in attacks:
-                    obtained_stars = attack.get('stars', 0) 
-                    destruction = attack.get('destructionPercentage', 0)
-                    total_stars += obtained_stars
-                    total_destruction += destruction
-                    
-                    
-                member_data = ({
-                    'name': member_name,
-                    'townhallLevel': th_lvl,
-                    'stars': total_stars,
-                    'destruction': total_destruction,
-                    'attacks': total_attacks
-                })
-
-                if total_attacks > 0:
-                    members_with_attacks.append(member_data)
-                else: 
-                    members_without_attacks.append(member_data)
-
-            # Sort by stars (descending) and destruction percentage (descending as a tiebreaker)
-        sorted_with_attacks = sorted(members_with_attacks, key=lambda x: (x['stars'], x['destruction']), reverse=True)
-        sorted_without_attacks = sorted(members_without_attacks, key=lambda x: (x['townhallLevel'], x['name']), reverse=True)
-
-        if war_state == 'inWar':
-            attackers_info = "```yaml\n**✅Members Who Already Attacked in Current War**\n"
-        elif war_state == 'warEnded':
-            attackers_info = "```yaml\n**✅Members Who Attacked in Most Recent War**\n"
-
-        for i,member in enumerate(sorted_with_attacks):
-            attackers_info += (f"{i+1}. {member['name']}: Stars: {member['stars']}, "
-                 f"Percentage: {member['destruction']}%, "
-                 f"Attacks: {member['attacks']}/2 \n")
-        
-        attackers_info += "```"
-
-        if war_state == 'inWar':
-            soon_to_be_attackers = "```yaml\n**❌Members Who Haven't Attacked in Current War**\n"
-        if war_state == 'warEnded':
-            soon_to_be_attackers = "```yaml\n**❌Members Who Didn't Attack in Most Recent War**\n"
-
-        for i, member in enumerate(sorted_without_attacks):
-            soon_to_be_attackers += (f"{i + 1}. {member['name']}: THlvl: {member['townhallLevel']}, "
-            f"Attacks: {member['attacks']}/2\n")
-                 
-        soon_to_be_attackers +="```"
-        await interaction.followup.send(attackers_info)
-        await interaction.followup.send(soon_to_be_attackers)
-
-
-    elif response.status_code == 404: 
-        await interaction.followup.send("No current war found for the specified clan.")
+    # 4) Pick endpoint and flags
+    if wartag:
+        # CWL war by warTag
+        wt = wartag.strip().lstrip("#").upper()
+        url       = f"https://api.clashofclans.com/v1/clanwarleagues/wars/%23{wt}"
+        is_cwl    = True
+        source    = "CWL"
     else:
-        await interaction.followup.send(f"Error retrieving current war info: {response.status_code}, {response.text}")
+        # Normal clan war
+        url       = f"https://api.clashofclans.com/v1/clans/%23{db_tag}/currentwar"
+        is_cwl    = False
+        source    = "Normal"
 
+    # 5) Fetch war data
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 404:
+        msg = (
+            "No CWL war found with that tag."
+            if wartag else
+            "Your clan is not in a war right now."
+        )
+        return await interaction.followup.send(msg)
+    if resp.status_code != 200:
+        return await interaction.followup.send(
+            f"Error fetching war: {resp.status_code} – {resp.text}"
+        )
 
+    war_data = resp.json()
 
-#clan_tag = '#2QQ2VCU82'.replace('#','%23')
-@bot.tree.command(name="cwlcurrent", description="Receive information about the current war")
+    # 6) Normalize helper
+    def normalize(t: str) -> str:
+        return t.strip().lstrip("#").upper()
+
+    # 7) Identify which side is _your_ clan
+    clanA = war_data.get("clan", {})
+    clanB = war_data.get("opponent", {})
+
+    if is_cwl:
+        # compare both sides to your saved tag
+        if normalize(clanA.get("tag","")) == db_tag:
+            our_block, opp_block = clanA, clanB
+        else:
+            our_block, opp_block = clanB, clanA
+    else:
+        # in normal war, "clan" is always your clan
+        our_block, opp_block = clanA, clanB
+
+    # 8) Determine max attacks per member
+    max_attacks = 1 if is_cwl else 2
+
+    # 9) Collect stats for your clan’s members
+    def collect_stats(members):
+        attacked   = []
+        unattacked = []
+        for m in members:
+            name = m.get("name")
+            th   = m.get("townHallLevel") or m.get("townhallLevel")
+            atks = m.get("attacks", [])
+            cnt   = len(atks)
+            stars = sum(a.get("stars",0) for a in atks)
+            pct   = sum(a.get("destructionPercentage",0) for a in atks)
+            entry = {
+                "name": name,
+                "th":    th,
+                "stars": stars,
+                "pct":   pct,
+                "att":   cnt
+            }
+            if cnt > 0:
+                attacked.append(entry)
+            else:
+                unattacked.append(entry)
+
+        attacked.sort(key=lambda e:(e["stars"], e["pct"]), reverse=True)
+        unattacked.sort(key=lambda e:(e["th"], e["name"]))
+        return attacked, unattacked
+
+    members      = our_block.get("members", [])
+    with_attacks, without_attacks = collect_stats(members)
+
+    # 10) Build YAML‐style output
+    lines = []
+    lines.append("```yaml")
+    lines.append(f"**{source} War Stats — {our_block.get('name','Your Clan')} VS {opp_block.get('name','Opp Clan')}**")
+    lines.append(f"State: {war_data.get('state','Unknown')}")
+    st = war_data.get("startTime")
+    et = war_data.get("endTime")
+    if st: lines.append(f"Start: {format_datetime(st)}")
+    if et: lines.append(f"End:   {format_datetime(et)}")
+    lines.append("")
+
+    lines.append("✅ Attacked")
+    for i, e in enumerate(with_attacks, start=1):
+        lines.append(
+            f"{i}. {e['name']}: Stars {e['stars']}, "
+            f"Destr {e['pct']}%, Attacks {e['att']}/{max_attacks}"
+        )
+
+    lines.append("")
+    lines.append("❌ Not Attacked")
+    for i, e in enumerate(without_attacks, start=1):
+        lines.append(
+            f"{i}. {e['name']}: TH {e['th']}, Attacks {e['att']}/{max_attacks}"
+        )
+
+    lines.append("```")
+
+    # 11) Send back to Discord
+    await interaction.followup.send("\n".join(lines))
+        
+@bot.tree.command(name="cwlcurrent", description="Receive information about the current CWL war")
 async def warInfo(interaction: discord.Interaction):
-
-    cursor = get_db_connection()
+    # 1) Fetch your saved clan tag
+    cursor   = get_db_connection()
     guild_id = interaction.guild.id
-    cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
-    result = cursor.fetchone()
+    cursor.execute(
+        "SELECT clan_tag FROM servers WHERE guild_id = %s",
+        (guild_id,)
+    )
+    row = cursor.fetchone()
+    if not row or not row[0]:
+        return await interaction.response.send_message(
+            "No clan tag is set for this server. Use /setclantag first.",
+            ephemeral=True
+        )
+    raw_tag = row[0]                   # e.g. "#2PLGJ8PQJ"
+    enc_tag = raw_tag.replace("#", "%23")
 
-    if not result or not result[0]:
-        await interaction.response.send_message("No clan tag is set for this server. Please set a clan tag using /setclantag.")
-        return
-    
-    clan_tag = result[0].replace('#', '%23')  # Format the clan tag for the API request
-    og_clan_tag = result[0]  # Store original clan tag for later use
-    await interaction.response.defer() # Defer the interaction to allow time for processing 
+    # 2) Defer for API time
+    await interaction.response.defer()
 
-    if not api_key:
-        raise ValueError("API KEY NOT FOUND")
+    # 3) Normalizer helper
+    def normalize(t: str) -> str:
+        return t.strip().lstrip("#").upper()
 
-    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}/currentwar/leaguegroup'
-    headers = {'Authorization': f'Bearer {api_key}', 'Accept': 'application/json'}
+    my_norm = normalize(raw_tag)
+
+    # 4) Fetch the CWL leaguegroup
+    url     = f"https://api.clashofclans.com/v1/clans/{enc_tag}/currentwar/leaguegroup"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept":        "application/json"
+    }
     response = requests.get(url, headers=headers)
 
-    if response.status_code == 200: 
-        war_data = response.json()
-        rounds = war_data.get('rounds', [])  # Retrieve CWL rounds
-
-        clan_info_list = []  # Store clans with correct war tags
-
-        # ✅ Store all clans except your own BEFORE processing rounds
-        clan_list = [
-            {"name": clan.get("name", "Unknown"), "tag": clan.get("tag", "Unknown")}
-            for clan in war_data.get("clans", [])
-            if clan.get("tag") != og_clan_tag  # Ignore own clan
-        ]
-        print(clan_list)
-
-        missing_clan_index = 0  # ✅ Track which clan to use for missing opponents
-
-        # Within your loop for each round:
-        for i in range(len(rounds)):  
-            war_tags = rounds[i].get("warTags", [])  
-            war_tags = [tag.replace("#", "%23") for tag in war_tags]  
-
-            opponent_name = "Unknown"
-            opponent_tag = "Unknown"
-            correct_war_tag = None  
-
-            # Check through all war_tags for a valid opponent
-            for war_tag in war_tags:  
-                war_url = f"https://api.clashofclans.com/v1/clanwarleagues/wars/{war_tag}"
-                war_response = requests.get(war_url, headers=headers)
-
-                if war_response.status_code == 200:
-                    war_details = war_response.json()
-                    war_clan_tag = war_details.get("clan", {}).get("tag", "Unknown")
-                    opp_tag = war_details.get("opponent", {}).get("tag", "Unknown")
-                    opp_name = war_details.get("opponent", {}).get("name", "Unknown")
-
-                    # If our own clan is found (either as clan or opponent), use the opposing data
-                    if war_clan_tag == og_clan_tag or opp_tag == og_clan_tag:
-                        correct_war_tag = war_tag
-                        if opp_tag == og_clan_tag:
-                            # Swap so that the opponent info actually becomes our enemy
-                            opp_name = war_details.get("clan", {}).get("name", "Unknown")
-                            opp_tag = war_clan_tag
-                        opponent_name, opponent_tag = opp_name, opp_tag
-                        break  
-
-            # If we didn't get a valid opponent from the API, fall back to the clan_list.
-            if opponent_name == "Unknown" or opponent_tag == "Unknown":
-                if clan_list:  # If there is at least one fallback clan left,
-                    fallback = clan_list.pop(0)  # pop it (thus removing it from the list)
-                    opponent_name, opponent_tag = fallback["name"], fallback["tag"]
-
-            # Otherwise, if we did get a valid opponent from the API,
-            # we remove all instances of that clan from the fallback list.
-            else:
-                clan_list = [clan for clan in clan_list if clan["tag"] != opponent_tag]
-
-            # Append round information
-            clan_info_list.append(
-                f"Round {i+1}: {opponent_name} (Tag: {opponent_tag}) - War Tag: {(correct_war_tag or 'No war tag').replace('%23', '#')}"
-            )
-
-
-        # Format response with YAML structure
-        war_info = (
-            f'```yaml\n'
-            f"**Current CWL War Information**\n"
-            f"State: {war_data.get('state', 'Unknown')}\n"
-            f"Season: {war_data.get('season', 'Unknown')}\n"
-            f"Rounds:\n" + "\n".join(f"{info}" for info in clan_info_list) + f"\n```\n"
+    if response.status_code == 404:
+        return await interaction.followup.send(
+            "This clan is not participating in CWL right now."
+        )
+    if response.status_code != 200:
+        return await interaction.followup.send(
+            f"Error fetching CWL: {response.status_code} – {response.text}"
         )
 
-        await interaction.followup.send(war_info)
+    data   = response.json()
+    state  = data.get("state",  "Unknown")
+    season = data.get("season", "Unknown")
+    clans  = data.get("clans",  [])
+    rounds = data.get("rounds", [])
 
-    elif response.status_code == 404:
-        await interaction.followup.send("Currently not in CWL.")
-    else:
-        await interaction.followup.send(f"Error retrieving current war info: {response.status_code}, {response.text}")
+    # 5) Build header & participating clans list
+    lines = [
+        f"**CWL Season {season}**  -  State: {state}",
+        "",
+        "Participating Clans:"
+    ]
+    for i, c in enumerate(clans, start=1):
+        lines.append(
+            f"{i}. {c['name']} ({c['tag']}) – Level {c['clanLevel']}"
+        )
+
+    lines.append("") 
+    lines.append("Round Schedule:")
+
+    # 6) Cache war detail lookups
+    war_cache = {}
+
+    # 7) For each round, find your clan's warTag, then print the opponent name
+    for idx, rnd in enumerate(rounds, start=1):
+        clan_wt       = None
+        opponent_name = None
+
+        for wt in rnd.get("warTags", []):
+            if not wt or wt == "#0":
+                continue
+
+            # fetch & cache the war detail
+            if wt not in war_cache:
+                wt_enc = wt.replace("#", "%23")
+                wresp  = requests.get(
+                    f"https://api.clashofclans.com/v1/clanwarleagues/wars/{wt_enc}",
+                    headers=headers
+                )
+                if wresp.status_code == 200:
+                    war_cache[wt] = wresp.json()
+                else:
+                    war_cache[wt] = None
+
+            wdata = war_cache[wt]
+            if not wdata:
+                continue
+
+            tagA = wdata["clan"]["tag"]
+            tagB = wdata["opponent"]["tag"]
+            # match your clan on either side
+            if normalize(tagA) == my_norm:
+                clan_wt       = wt
+                opponent_name = wdata["opponent"]["name"]
+                break
+            if normalize(tagB) == my_norm:
+                clan_wt       = wt
+                opponent_name = wdata["clan"]["name"]
+                break
+
+        # 8) Append one line: opponent + (warTag) or fallback
+        if clan_wt:
+            lines.append(f"Round {idx}: {opponent_name} (War Tag: {clan_wt})")
+        else:
+            lines.append(f"Round {idx}: Not yet scheduled")
+
+    # 9) Wrap in a YAML code block and send
+    text = "```yaml\n" + "\n".join(lines) + "\n```"
+    await interaction.followup.send(text)
 
 
 @bot.tree.command(name="cwlspecificwars", description="Receive general information about current war")
@@ -1308,6 +1354,7 @@ async def warInfo(interaction: discord.Interaction, war_tag: str):
 
     if not api_key:
         raise ValueError("API KEY NOT FOUND")
+    war_tag = war_tag.replace('#', '%23')  # Format the war tag for the API request
 
     url= f'https://api.clashofclans.com/v1/clanwarleagues/wars/{war_tag}'
     headers = {
@@ -1411,57 +1458,110 @@ async def warInfo(interaction: discord.Interaction, war_tag: str):
         await interaction.followup.send(f"Error retrieving current war info: {response.status_code}, {response.text}")
 
 
-@bot.tree.command(name = "cwlclansearch", description = "Search up other clans in CWL")
-@app_commands.describe(clanname = "The clan's name")
-async def CWL_clan_search(interaction: discord.Interaction, clanname: str):
-    cursor = get_db_connection()
+@bot.tree.command(name= "cwlclansearch",description = "Search CWL clans by name or tag")
+@app_commands.describe(nameortag = "Clan name (e.g. MyClan) or tag (e.g. #2PLGJ8PQJ)")
+async def CWL_clan_search(interaction: discord.Interaction, nameortag: str):
+    # 1) fetch saved clan tag
+    cursor   = get_db_connection()
     guild_id = interaction.guild.id
-    cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild_id,))
-    result = cursor.fetchone()
+    cursor.execute(
+        "SELECT clan_tag FROM servers WHERE guild_id = %s",
+        (guild_id,)
+    )
+    row = cursor.fetchone()
+    if not row or not row[0]:
+        return await interaction.response.send_message(
+            "No clan tag set for this server. Use `/setclantag` first.",
+            ephemeral=True
+        )
 
-    if not result or not result[0]:
-        await interaction.response.send_message("No clan tag is set for this server. Please set a clan tag using /setclantag.")
-        return
+    raw_tag = row[0]
+    enc_tag = raw_tag.replace("#", "%23")
+
+    # 2) detect name vs tag
+    query  = nameortag.strip()
+    is_tag = query.startswith("#") or re.fullmatch(r"[0-9A-Z]+", query.upper())
     
-    clan_tag = result[0].replace('#', '%23')  # Format the clan tag for the API request
-    await interaction.response.defer()
-    url = f'https://api.clashofclans.com/v1/clans/{clan_tag}/currentwar/leaguegroup'
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-        'Accept': 'application/json'
-    }
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        war_data = response.json()
-        clan_found = False
-
-        for clan in war_data.get('clans', []):
-            if clan['name'].lower() == clanname.lower():
-                clan_found = True
-                sorted_members = sorted(clan['members'], key=lambda member: member['townHallLevel'], reverse=True)
-                member_info = "\n".join([
-                    f"Member{i+1}: {member['name']} (TH Level: {member['townHallLevel']})"
-                   # for member in clan['members']
-                    for i, member in enumerate(sorted_members)
-                ])
-                war_info = (
-                    f'```yaml\n'
-                    f"**CWL Clan Search Result**\n"
-                    f"Clan: {clan['name']} (Tag: {clan['tag']})\n"
-                    f"Members:\n{member_info}\n"
-                    f"```\n"
-                )
-                await interaction.followup.send(war_info)
-                break
-        
-        if not clan_found:
-            await interaction.followup.send(f"Clan '{clanname}' not found in the current CWL.")
-        elif response.status_code == 404: 
-            await interaction.followup.send("Currently not in CWL.")    
+    if is_tag:
+        search_tag = query.upper().lstrip("#")
     else:
-        await interaction.followup.send(f"Error retrieving CWL information: {response.status_code}, {response.text}")
+        search_name = query.lower()
 
-    
+    await interaction.response.defer()
+
+    # 3) fetch CWL state
+    headers    = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept":        "application/json"
+    }
+    current_url = f"https://api.clashofclans.com/v1/clans/{enc_tag}/currentwar"
+    curr_resp   = requests.get(current_url, headers=headers)
+
+    if curr_resp.status_code == 404:
+        return await interaction.followup.send("This clan is not in a CWL war right now.")
+    if curr_resp.status_code != 200:
+        return await interaction.followup.send(
+            f"Error fetching CWL state: {curr_resp.status_code}"
+        )
+
+    curr_data = curr_resp.json()
+    state     = curr_data.get("state", "Unknown")
+
+    # 4) choose source of .get('clans', [])
+    if state == "preparation":
+        clans = curr_data.get("clans", [])
+    else:
+        league_url  = (
+            f"https://api.clashofclans.com/v1/"
+            f"clans/{enc_tag}/currentwar/leaguegroup"
+        )
+        league_resp = requests.get(league_url, headers=headers)
+        if league_resp.status_code != 200:
+            return await interaction.followup.send(
+                f"Error fetching league group: {league_resp.status_code}"
+            )
+        clans = league_resp.json().get("clans", [])
+
+    # 5) find the requested clan
+    match = None
+    for clan in clans:
+        name = clan["name"].lower()
+        tag  = clan["tag"].lstrip("#").upper()
+
+        if is_tag and tag == search_tag:
+            match = clan
+            break
+        if not is_tag and name == search_name:
+            match = clan
+            break
+
+    if not match:
+        return await interaction.followup.send(
+            f"Clan `{nameortag}` not found in CWL ({state})."
+        )
+
+    # 6) sort & format members
+    sorted_m = sorted(
+        match.get("members", []),
+        key=lambda m: m["townHallLevel"],
+        reverse=True
+    )
+    member_info = "\n".join(
+        f"{i}. {m['name']} (TH {m['townHallLevel']})"
+        for i, m in enumerate(sorted_m, start=1)
+    )
+
+    # 7) send result
+    war_info = (
+        "```yaml\n"
+        "**CWL Clan Search Result**\n"
+        f"State: {state}\n"
+        f"Clan: {match['name']} (Tag: {match['tag']})\n"
+        "Members:\n"
+        f"{member_info}\n"
+        "```"
+    )
+    await interaction.followup.send(war_info)
 
 
 @bot.tree.command(name="playerinfo", description="Get player's general information")
