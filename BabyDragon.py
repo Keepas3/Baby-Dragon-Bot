@@ -782,12 +782,13 @@ async def clanInfo(interaction: discord.Interaction):
         value=f":trophy: {clan_data['requiredBuilderBaseTrophies']}",
         inline=True
     )
-    embed.add_field(
-        name="War Win/Draw/Loss Record",
-        value=f"{clan_data['warWins']}  / {clan_data['warTies']} / {clan_data['warLosses']} ",
-        inline=True
-    )
-    embed.add_field(name = "War Streak", value=str(clan_data['warWinStreak']), inline=True)
+    if clan_data['isWarLogPublic']:
+        embed.add_field(
+            name="War Win/Draw/Loss Record",
+            value=f"{clan_data['warWins']}  / {clan_data['warTies']} / {clan_data['warLosses']} ",
+            inline=True
+        )
+        embed.add_field(name = "War Streak", value=str(clan_data['warWinStreak']), inline=True)
 
     embed.add_field(name ="CWL League", value=clan_data['warLeague']['name'], inline=False)
     embed.add_field(name ="Clan Capital League", value=clan_data['capitalLeague']['name'], inline=True)
@@ -1111,6 +1112,8 @@ async def warLog(interaction: discord.Interaction, limit: int = 1):
 
     elif response.status_code == 404:
         await interaction.followup.send("No war log found for the specified clan.")
+    elif response.status_code == 403:
+        await interaction.followup.send("Clan's war log is private. Cannot display war log.")
     else:
         await interaction.followup.send(f"Error retrieving war log: {response.status_code}, {response.text}")
 
@@ -1163,6 +1166,10 @@ async def currentwar(
         source = "Normal"
 
     resp = requests.get(url, headers=headers)
+    if resp.status_code == 403:
+        return await interaction.followup.send(
+            "War data is private for this clan. Cannot display current war."
+        )
     if resp.status_code != 200:
         return await interaction.followup.send(
             f"Error fetching war: {resp.status_code} – {resp.text}"
