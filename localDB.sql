@@ -8,7 +8,8 @@ CREATE TABLE servers (
 CREATE TABLE players (    
     discord_id CHAR(20) NOT NULL,    
     discord_username TEXT NOT NULL,    
-    guild_id CHAR(20) NOT NULL,    
+    guild_id CHAR(20) NOT NULL, 
+    guild_name TEXT NOT NULL,   
     player_tag TEXT,    
     PRIMARY KEY (discord_id, guild_id)
     );
