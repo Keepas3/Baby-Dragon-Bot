@@ -131,20 +131,39 @@ def get_clan_data(clan_tag: str) -> dict:
         tag = "#" + tag
 
     encoded_tag = tag.replace("#", "%23")
-
     url = f'https://api.clashofclans.com/v1/clans/{encoded_tag}'
-   # print(f"Requesting URL: {url}")
+
     headers = {
         'Authorization': f'Bearer {api_key}',
         'Accept': 'application/json'
     }
+    
     response = requests.get(url, headers=headers)
+    
     if response.status_code != 200:
+        # Default fallback if JSON parsing fails
+        error_detail = response.text 
+        
         try:
-            reason = response.json().get("reason", response.text)
+            # Try to parse the JSON error from Clash API
+            error_json = response.json()
+            
+    
+            message = error_json.get("message", "No message provided")
+            reason = error_json.get("reason", "Unknown reason")
+            
+            error_detail = f"{reason} - {message}"
+            
+          
+            print(f"\n[!] CLASH API IP ERROR: {message}\n")
+            
         except Exception:
-            reason = response.text
-        raise RuntimeError(f"Clash API Error ({response.status_code}): {reason}")
+            # If response wasn't JSON, just keep the raw text
+            pass
+
+        # Raise the error so the bot knows it failed, but now including the IP info
+        raise RuntimeError(f"Clash API Error ({response.status_code}): {error_detail}")
+
     return response.json()
 
 def add_spaces(text):
@@ -250,13 +269,27 @@ def get_player_data(player_tag: str) -> dict:
         'Authorization': f'Bearer {api_key}',
         'Accept': 'application/json'
     }
+    
     response = requests.get(url, headers=headers)
+    
     if response.status_code != 200:
+        # --- NEW ERROR HANDLING LOGIC ---
         try:
-            reason = response.json().get("reason", response.text)
+            data = response.json()
+        
+            message = data.get("message", "No message found") 
+            reason = data.get("reason", response.text)
+            
+    
+            print(f"!!! CLASH API ERROR: {message} !!!") 
+            
+            error_text = f"{reason} - {message}"
         except Exception:
-            reason = response.text
-        raise RuntimeError(f"Clash API Error ({response.status_code}): {reason}")
+            # Fallback if the response isn't JSON
+            error_text = response.text
+
+        raise RuntimeError(f"Clash API Error ({response.status_code}): {error_text}")
+    
     return response.json()
 
 
