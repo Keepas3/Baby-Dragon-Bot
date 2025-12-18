@@ -321,7 +321,7 @@ def fetch_player_from_DB(cursor,guild_id: int,user: discord.Member = None,provid
 async def on_ready():
     """Fetch clan tags dynamically"""
     await bot.tree.sync()  # Sync commands globally
-    await bot.change_presence(activity=discord.Game(name='With Fire'))
+    await bot.change_presence(activity=discord.Game(name='Playing with Fire'))
     cursor = get_db_connection()  # Get an active cursor—this ensures reconnect if needed   
     for guild in bot.guilds:
         cursor.execute("SELECT clan_tag FROM servers WHERE guild_id = %s", (guild.id,))
@@ -398,8 +398,7 @@ async def help_command(interaction: discord.Interaction):
         value=(
             "`/playerinfo` - Get player's general information\n"
             "`/playertroops` - Get a player's troop levels\n"
-            "`/playerheroes` - Get a player's heroes/equipments\n"
-            "`/playerequipments` - Get info on all of a player's equipments\n"
+            "`/playerequipments` - Get all levels of a player's equipments\n"
             "`/playerspells` - Get player's spell levels"
         ),
         inline=False
