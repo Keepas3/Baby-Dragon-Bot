@@ -123,48 +123,62 @@ def check_coc_clan_tag(clan_tag):
     elif response.status_code == 404: 
         return False
 
-# 1. Update Validation Functions
-async def check_coc_clan_tag(clan_tag): 
-    try:
-        # get_clan automatically handles the tag normalization and API call
-        await coc_client.get_clan(clan_tag)
+def check_coc_player_tag(player_tag): 
+    url = f'https://api.clashofclans.com/v1/players/{player_tag}' 
+    headers = { 'Authorization': f'Bearer {api_key}', 'Accept': 'application/json' }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
         return True
-    except coc.NotFound:
-        return False
-    except coc.ClashOfClansException:
+    elif response.status_code == 404:
         return False
 
-async def check_coc_player_tag(player_tag): 
-    try:
-        await coc_client.get_player(player_tag)
-        return True
-    except coc.NotFound:
-        return False
-    except coc.ClashOfClansException:
-        return False
+import urllib.parse
 
-# 2. Update Data Retrieval Function
-async def get_clan_data(clan_tag: str):
-    """
-    Fetches clan data using the coc_client. 
-    This automatically uses the whitelisted IP key managed by coc.py.
-    """
-    try:
-        # You no longer need to manually encode tags like %23
-        clan = await coc_client.get_clan(clan_tag)
+
+
+def get_clan_data(clan_tag: str) -> dict:
+    if not api_key:
+        raise ValueError("API KEY NOT FOUND")
+
+    tag = clan_tag.strip().upper()
+    if not tag.startswith("#"):
+        tag = "#" + tag
+
+    encoded_tag = tag.replace("#", "%23")
+    url = f'https://api.clashofclans.com/v1/clans/{encoded_tag}'
+
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Accept': 'application/json'
+    }
+    
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code != 200:
+        # Default fallback if JSON parsing fails
+        error_detail = response.text 
         
-        # coc.py returns an Object, but if you need a dict to keep the rest 
-        # of your code working, you can use the .to_dict() helper.
-        return clan
-        
-    except coc.NotFound:
-        raise RuntimeError(f"Clash API Error (404): Clan {clan_tag} not found.")
-    except coc.Maintenance:
-        raise RuntimeError("Clash of Clans API is currently under maintenance.")
-    except coc.ClashOfClansException as e:
-        # This catches IP errors, invalid keys, etc.
-        print(f"\n[!] CLASH API ERROR: {e}\n")
-        raise RuntimeError(f"Clash API Error: {e}")
+        try:
+            # Try to parse the JSON error from Clash API
+            error_json = response.json()
+            
+    
+            message = error_json.get("message", "No message provided")
+            reason = error_json.get("reason", "Unknown reason")
+            
+            error_detail = f"{reason} - {message}"
+            
+          
+            print(f"\n[!] CLASH API IP ERROR: {message}\n")
+            
+        except Exception:
+            # If response wasn't JSON, just keep the raw text
+            pass
+
+        # Raise the error so the bot knows it failed, but now including the IP info
+        raise RuntimeError(f"Clash API Error ({response.status_code}): {error_detail}")
+
+    return response.json()
 
 def add_spaces(text):
     return re.sub(r'(?<!^)(?=[A-Z])', ' ', text)
