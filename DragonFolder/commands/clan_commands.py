@@ -171,7 +171,7 @@ class ClanCommands(commands.Cog):
                 elif rank in ["leagues", "league"]:
                     member_info = f"{m.clan_rank}. {m.name}, {role_display}, {m.league.name}\n"
                 else: # TH or ROLE
-                    member_info = f"{m.clan_rank}. {m.name}, {role_display}, TH:{m.town_hall}\n"
+                    member_info = f"{m.clan_rank}. {m.name}, {role_display}, [TH{m.town_hall}]\n"
 
                 # Check message length (Discord 2000 char limit)
                 if len(member_list) + len(member_info) > 1990:
@@ -264,13 +264,13 @@ class ClanCommands(commands.Cog):
             tag = fetch_clan_from_db(interaction.guild.id)
             data = await calculate_raid_season_stats(tag)
             if not data: return await interaction.followup.send("No raid found.")
-            
-            res =(   
+            state = data['state']
+            res = (
         f"```yaml\n"
         f"Status: {data['state']}\n"
-        f"Start: {data['start']}\n"
-        f"End: {data['end']}\n"
-        f"Medals {data['medals']} | Total Loot: {data['loot']:,}\n"
+        f"Start Time: {data['start']}\n"
+        f"End Time: {data['end']}\n"
+        f"Medals Earned: {data['medals']} | Total Loot: {data['loot']:,}\n"
         f"Member Stats:\n{data['stats_text']}\n"
         f"```"
             )
