@@ -495,20 +495,26 @@ async def server_status(interaction: discord.Interaction):
 @bot.tree.command(name='setclantag', description="Set the clan tag for this server")
 async def set_clan_tag(interaction: discord.Interaction, new_tag: str):
     global db_connection, cursor
-    cursor = get_db_connection()  # Get an active cursor—this ensures reconnect if needed
-    global clan_tag
+    cursor = get_db_connection()
+    
+    guild_id = interaction.guild.id
 
-    guild_id = interaction.guild.id  # Get current server ID
-
-    if check_coc_clan_tag(new_tag.replace('#', '%23')):  # Validate the tag
-        clan_tag = new_tag.replace('#', '%23')  # Format the clan tag for the API request
-       # og_clan_tag = new_tag  # Store the original clan tag for display
-        cursor.execute("UPDATE servers SET clan_tag = %s WHERE guild_id = %s", (new_tag, guild_id))
-        db_connection.commit()  # Use db_connection.commit() instead of conn.commit()
-        
-        await interaction.response.send_message(f'Clan tag has been updated to {new_tag} for this server!')
-    else:
-        await interaction.response.send_message("Not a valid Clan ID")
+    # 1. Use 'await' because check_coc_clan_tag is an async function
+    # 2. Pass the tag directly; coc.py handles the # encoding internally
+    try:
+        if await check_coc_clan_tag(new_tag):  
+            # Update the database with the normalized tag
+            cursor.execute(
+                "UPDATE servers SET clan_tag = %s WHERE guild_id = %s", 
+                (new_tag.upper(), guild_id)
+            )
+            db_connection.commit()
+            
+            await interaction.response.send_message(f'Clan tag has been updated to **{new_tag.upper()}** for this server!')
+        else:
+            await interaction.response.send_message("Not a valid Clan ID. Please check the tag and try again.")
+    except Exception as e:
+        await interaction.response.send_message(f"Error: The bot is still initializing or login failed. Details: {e}")
                   
           
 @bot.tree.command(name='link', description="Link your Clash of Clans account to your Discord account")
