@@ -54,9 +54,16 @@ class PlayerCommands(commands.Cog):
             embed.add_field(name="Exp Lvl", value=player_data.exp_level, inline=True)
 
             # coc.py uses .war_opt_in which returns a boolean or specific string
-            pref = player_data.war_opted_in or "Unknown"
-            pref_icon = ":white_check_mark:" if pref.lower == "true" else ":x:"
-            embed.add_field(name="War Preference", value=f"{pref_icon} {pref}", inline=True)
+            pref = player_data.war_opted_in or "Unknown" 
+            if pref == True:
+                pref = "Opted In"
+            elif pref == False:
+                pref = "Opted Out"
+            elif pref == None:
+                pref = "Not in a clan"
+            print(f"War Preference Raw: {player_data.war_opted_in}")
+            
+            embed.add_field(name="War Preference", value=f"{pref}", inline=True)
 
             embed.add_field(name="Trophies", value=f":trophy: {player_data.trophies}", inline=True)
             embed.add_field(name="Best Trophies", value=f":trophy: {player_data.best_trophies}", inline=True)

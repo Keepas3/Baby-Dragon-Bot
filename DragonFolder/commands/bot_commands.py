@@ -69,7 +69,7 @@ class BotCommands(commands.Cog):
                 INSERT INTO players (discord_id, discord_username, guild_id, guild_name, player_tag)
                 VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE player_tag = VALUES(player_tag)
-            """, (interaction.user.id, interaction.user.name, interaction.guild.id, interaction.guild.name, clean_tag))
+            """, (interaction.user.id, interaction.user.display_name, interaction.guild.id, interaction.guild.name, clean_tag))
             await interaction.response.send_message(f"Linked to **{clean_tag}**!")
         else:
             await interaction.response.send_message("Invalid player tag.", ephemeral=True)

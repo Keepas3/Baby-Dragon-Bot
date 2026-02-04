@@ -1,6 +1,10 @@
-import discord
 import os
+import sys
+
+
+sys.path.append(os.path.join(os.getcwd(), 'DragonFolder'))
 import asyncio
+import discord
 from discord.ext import commands
 # Import bot and other setups from your config file
 from config import TOKEN, coc_client, initialize_coc, bot 
@@ -26,6 +30,8 @@ async def setup():
         
         # 2. Call the function to load your command files
         await load_extensions() 
+        # Inside your setup_hook or main function
+#await bot.add_cog(WarPatrol(bot, coc_client))
         
         # 3. Final step: Launch the bot
         # NOTE: Syncing is moved to on_ready to avoid MissingApplicationID error
