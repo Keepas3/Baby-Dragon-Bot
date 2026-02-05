@@ -3,48 +3,64 @@ import mysql.connector
 import coc
 import discord
 from discord.ext import commands
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Credentials
 TOKEN = os.getenv('DISCORD_TOKEN2')
 COC_EMAIL = os.getenv('COC_EMAIL')
 COC_PASSWORD = os.getenv('COC_PASSWORD')
 
-# Clients and Intents
+# 1. Initialize the Client
+# In coc.py 4.0.0, we create the client instance first. 
+# It will use these key_names to manage your API keys on the developer portal.
 coc_client = coc.Client(key_names="Railway Bot")
 
 intents = discord.Intents.default()
-intents.messages = True
-intents.message_content = True
-intents.presences = True
+intents.message_content = True  # Required for prefix commands
+intents.members = True          # Useful for tracking joins/leaves
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- THE MISSING FUNCTION ---
+# 2. Asynchronous CoC Initialization
 async def initialize_coc():
-    """Handles login and automatic IP whitelisting."""
+    """Handles the async login process required in v4.0.0."""
     try:
+        # This will automatically handle IP changes by creating/updating keys
         await coc_client.login(COC_EMAIL, COC_PASSWORD)
-        print("Successfully logged into CoC and updated API key.")
+        print("✅ CoC Client logged in and keys synchronized.")
     except coc.InvalidCredentials as e:
-        print(f"Failed to login to CoC: {e}")
+        print(f"❌ CoC Login Failed: {e}")
+    except Exception as e:
+        print(f"❌ Unexpected CoC Error: {e}")
 
-# Database logic
+# 3. Robust Database logic
 def connect_db():
-    host = os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "localhost")
+    # Railway provides these variables automatically if you use their MySQL service
+    host = os.getenv("MYSQLHOST", "localhost")
     user = os.getenv("MYSQLUSER", "root")
-    password = os.getenv("MYSQLPASSWORD", os.getenv("MY_SQL_PASSWORD"))
-    database = os.getenv("MYSQLDATABASE", os.getenv("MY_SQL_DATABASE2"))
-    port = os.getenv("RAILWAY_TCP_PROXY_PORT", "3306")
+    password = os.getenv("MYSQLPASSWORD")
+    database = os.getenv("MYSQLDATABASE")
+    port = os.getenv("MYSQLPORT", "3306")
     
     return mysql.connector.connect(
-        host=host, user=user, password=password, 
-        database=database, port=port, autocommit=True
+        host=host, 
+        user=user, 
+        password=password, 
+        database=database, 
+        port=port, 
+        autocommit=True
     )
 
 db_connection = None
 
 def get_db_cursor():
     global db_connection
-    if db_connection is None or not db_connection.is_connected():
-        db_connection = connect_db()
-    return db_connection.cursor()
+    try:
+        if db_connection is None or not db_connection.is_connected():
+            db_connection = connect_db()
+        return db_connection.cursor()
+    except Exception as e:
+        print(f"DB Connection Error: {e}")
+        return None

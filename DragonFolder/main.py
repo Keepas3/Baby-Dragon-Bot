@@ -7,7 +7,7 @@ import asyncio
 import discord
 from discord.ext import commands
 # Import bot and other setups from your config file
-from config import TOKEN, coc_client, initialize_coc, bot 
+from config import TOKEN, coc_client, get_db_cursor, initialize_coc, bot 
 
 async def load_extensions():
     """Loops through the commands/ folder and loads every .py file."""
@@ -31,7 +31,7 @@ async def setup():
         # 2. Call the function to load your command files
         await load_extensions() 
         # Inside your setup_hook or main function
-#await bot.add_cog(WarPatrol(bot, coc_client))
+        #await bot.add_cog(WarPatrol(bot, coc_client))
         
         # 3. Final step: Launch the bot
         # NOTE: Syncing is moved to on_ready to avoid MissingApplicationID error
@@ -49,6 +49,36 @@ async def on_ready():
         
     await bot.change_presence(activity=discord.Game(name='Playing with Fire'))
 
+@bot.event
+async def on_guild_join(guild):
+    """Fires when the bot joins a new server. Initializes DB entry."""
+    print(f"Joined new guild: {guild.name} ({guild.id})")
+    try:
+        cursor = get_db_cursor()
+        # INSERT IGNORE prevents errors if the bot was previously in the server
+        cursor.execute("""
+            INSERT IGNORE INTO servers (guild_id, guild_name) 
+            VALUES (%s, %s)
+        """, (str(guild.id), guild.name))
+        
+        # Optional: Say hi
+        if guild.system_channel:
+            await guild.system_channel.send("Baby Dragon Bot has arrived! Use `/setclantag` to get started.")
+    except Exception as e:
+        print(f"DB Error on guild join: {e}")
+
+@bot.event
+async def on_guild_remove(guild):
+    """Fires when the bot is kicked or leaves. Cleans up DB."""
+    print(f"Removed from guild: {guild.name} ({guild.id})")
+    try:
+        cursor = get_db_cursor()
+        # Clean up the server data and all linked player data for this guild
+        cursor.execute("DELETE FROM servers WHERE guild_id = %s", (str(guild.id),))
+        cursor.execute("DELETE FROM players WHERE guild_id = %s", (str(guild.id),))
+        print(f"Successfully wiped data for {guild.name}")
+    except Exception as e:
+        print(f"DB Error on guild remove: {e}")
 if __name__ == "__main__":
     try:
         asyncio.run(setup())
