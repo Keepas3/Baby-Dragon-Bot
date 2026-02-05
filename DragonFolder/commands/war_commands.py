@@ -460,11 +460,10 @@ class WarPatrol(commands.Cog):
     def cog_unload(self):
         self.war_reminder.cancel()
 
-    @tasks.loop(minutes=30)
+    @tasks.loop(minutes=20)
     async def war_reminder(self):
         """Background task to check all linked clans for pending attacks."""
-        import asyncio
-        self.coc_client.loop = asyncio.get_running_loop()
+        
         
         try:
             cursor = get_db_cursor()

@@ -6,15 +6,25 @@ sys.path.append(os.path.join(os.getcwd(), 'DragonFolder'))
 import asyncio
 import discord
 from discord.ext import commands
-# Import bot and other setups from your config file
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
+
 from config import TOKEN, coc_client, get_db_cursor, initialize_coc, bot 
+
 
 async def load_extensions():
     """Loops through the commands/ folder and loads every .py file."""
     # We look inside the folder you named 'commands'
-    for filename in os.listdir('./commands'):
+    commands_dir = os.path.join(current_dir, 'commands')
+    
+    if not os.path.exists(commands_dir):
+        print(f"❌ Error: Could not find commands directory at {commands_dir}")
+        return
+
+    for filename in os.listdir(commands_dir):
         if filename.endswith('.py'):
-            # This converts 'bot_commands.py' to 'commands.bot_commands'
+            # Convert filename to extension syntax: 'commands.war_commands'
             extension_name = f'commands.{filename[:-3]}'
             try:
                 await bot.load_extension(extension_name)
