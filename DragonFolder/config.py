@@ -62,5 +62,6 @@ def get_db_cursor():
             db_connection = connect_db()
         return db_connection.cursor()
     except Exception as e:
-        print(f"DB Connection Error: {e}")
-        return None
+        # This will now print the REAL error to your Railway logs
+        print(f"CRITICAL DATABASE ERROR: {e}")
+        raise e  # This will force the bot to show the error in the logs
