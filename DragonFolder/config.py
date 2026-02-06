@@ -12,10 +12,8 @@ TOKEN = os.getenv('DISCORD_TOKEN2')
 COC_EMAIL = os.getenv('COC_EMAIL')
 COC_PASSWORD = os.getenv('COC_PASSWORD')
 
-# 1. Initialize the Client
-# In coc.py 4.0.0, we create the client instance first. 
-# It will use these key_names to manage your API keys on the developer portal.
-coc_client = coc.Client(key_names="Railway Bot")
+
+coc_client = None
 
 intents = discord.Intents.default()
 intents.message_content = True  # Required for prefix commands
@@ -25,15 +23,19 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # 2. Asynchronous CoC Initialization
 async def initialize_coc():
-    """Handles the async login process required in v4.0.0."""
+    """Handles the async login process and assigns the global client."""
+    global coc_client # CRITICAL: This tells Python to update the shared variable
     try:
-        # This will automatically handle IP changes by creating/updating keys
-        await coc_client.login(COC_EMAIL, COC_PASSWORD)
-        print("✅ CoC Client logged in and keys synchronized.")
-    except coc.InvalidCredentials as e:
-        print(f"❌ CoC Login Failed: {e}")
+        # Create the client INSIDE the function so it catches the current loop
+        new_client = coc.Client(key_names="Railway Bot")
+        await new_client.login(COC_EMAIL, COC_PASSWORD)
+        
+        # Now assign it to the global variable
+        coc_client = new_client
+        
+        print("✅ CoC Client logged in and global reference updated.")
     except Exception as e:
-        print(f"❌ Unexpected CoC Error: {e}")
+        print(f"❌ CoC Login Failed: {e}")
 
 # 3. Robust Database logic
 def connect_db():

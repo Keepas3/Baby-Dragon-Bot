@@ -1,21 +1,21 @@
 import os
 import sys
-
-
-sys.path.append(os.path.join(os.getcwd(), 'DragonFolder'))
 import asyncio
 import discord
 from discord.ext import commands
+
+# 1. Path Setup
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-from config import TOKEN, coc_client, get_db_cursor, initialize_coc, bot 
-
+# 2. Import bot and other setups from your config file
+# NOTE: We import the whole 'config' module to avoid getting a stale 'None' coc_client
+import config
+from config import TOKEN, get_db_cursor, initialize_coc, bot 
 
 async def load_extensions():
     """Loops through the commands/ folder and loads every .py file."""
-    # We look inside the folder you named 'commands'
     commands_dir = os.path.join(current_dir, 'commands')
     
     if not os.path.exists(commands_dir):
@@ -27,33 +27,38 @@ async def load_extensions():
             # Convert filename to extension syntax: 'commands.war_commands'
             extension_name = f'commands.{filename[:-3]}'
             try:
+                # This call triggers the 'setup(bot)' function in each command file
                 await bot.load_extension(extension_name)
-                print(f"Successfully loaded: {extension_name}")
+                print(f"✅ Successfully loaded: {extension_name}")
             except Exception as e:
-                print(f"Failed to load {extension_name}: {e}")
+                print(f"❌ Failed to load {extension_name}: {e}")
 
 async def setup():
     """The main manager that runs before the bot starts."""
     async with bot:
-        # 1. Start the Clash of Clans connection
+        # --- CRITICAL CHANGE 1: THE ORDER ---
+        # 1. Start the Clash of Clans connection FIRST.
+        # This populates config.coc_client so it's no longer None.
         await initialize_coc() 
         
-        # 2. Call the function to load your command files
+        # Give it a small heartbeat to ensure the login is registered
+        await asyncio.sleep(2)
+
+        # 2. NOW load the extensions. 
+        # When 'setup(bot)' runs in your command files, config.coc_client will be ready.
         await load_extensions() 
-        # Inside your setup_hook or main function
-        #await bot.add_cog(WarPatrol(bot, coc_client))
         
         # 3. Final step: Launch the bot
-        # NOTE: Syncing is moved to on_ready to avoid MissingApplicationID error
         await bot.start(TOKEN) 
+
+# --- BOT EVENTS ---
 
 @bot.event
 async def on_ready():
     """Triggered when the bot is officially connected to Discord."""
     try:
-        # Syncing here ensures the Application ID is retrieved first
         await bot.tree.sync() 
-        print(f'Logged in as {bot.user} and commands synced!')
+        print(f'🚀 Logged in as {bot.user} and commands synced!')
     except Exception as e:
         print(f"Error syncing tree: {e}")
         
@@ -61,17 +66,13 @@ async def on_ready():
 
 @bot.event
 async def on_guild_join(guild):
-    """Fires when the bot joins a new server. Initializes DB entry."""
     print(f"Joined new guild: {guild.name} ({guild.id})")
     try:
         cursor = get_db_cursor()
-        # INSERT IGNORE prevents errors if the bot was previously in the server
         cursor.execute("""
             INSERT IGNORE INTO servers (guild_id, guild_name) 
             VALUES (%s, %s)
         """, (str(guild.id), guild.name))
-        
-        # Optional: Say hi
         if guild.system_channel:
             await guild.system_channel.send("Baby Dragon Bot has arrived! Use `/setclantag` to get started.")
     except Exception as e:
@@ -79,17 +80,20 @@ async def on_guild_join(guild):
 
 @bot.event
 async def on_guild_remove(guild):
-    """Fires when the bot is kicked or leaves. Cleans up DB."""
     print(f"Removed from guild: {guild.name} ({guild.id})")
     try:
         cursor = get_db_cursor()
-        # Clean up the server data and all linked player data for this guild
         cursor.execute("DELETE FROM servers WHERE guild_id = %s", (str(guild.id),))
         cursor.execute("DELETE FROM players WHERE guild_id = %s", (str(guild.id),))
-        print(f"Successfully wiped data for {guild.name}")
     except Exception as e:
         print(f"DB Error on guild remove: {e}")
+
 if __name__ == "__main__":
+    # --- CRITICAL CHANGE 2: WINDOWS FIX ---
+    # Helps prevent loop errors on local Windows machines
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        
     try:
         asyncio.run(setup())
     except KeyboardInterrupt:

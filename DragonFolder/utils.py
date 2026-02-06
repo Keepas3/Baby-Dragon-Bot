@@ -57,6 +57,11 @@ def format_month_day_year(dt):
     est = dt_obj.astimezone(timezone(timedelta(hours=-5)))
     return est.strftime('%m-%d-%Y')
 
+def format_time(self, seconds):
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        return f"{hours}h {minutes}m"
+
 # 1. Update Validation Functions
 async def check_coc_clan_tag(clan_tag): 
     try:

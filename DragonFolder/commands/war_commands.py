@@ -4,6 +4,7 @@ import coc
 from discord.ext import commands, tasks
 from discord import app_commands, Embed
 from config import get_db_cursor, coc_client
+import config
 from utils import (
     fetch_clan_from_db, get_current_war_data, get_war_log_data,
     get_cwl_data, format_datetime, format_month_day_year, ClanNotSetError,
@@ -11,17 +12,15 @@ from utils import (
 )
 
 class WarCommands(commands.Cog):
-    def __init__(self, bot):
+    def __init__(self, bot, coc_client): # Add coc_client here
         self.bot = bot
+        self.coc_client = coc_client # Store it
 
     @app_commands.command(name="currentwar", description="Get info or member stats for current war")
-    @app_commands.describe(wartag="Tag for a specific CWL war", mode="info or stats")
+    @app_commands.describe(wartag="Tag for a specific CWL war", mode="info (Overview) or stats (Member details)")
     async def currentwar(self, interaction: discord.Interaction, wartag: str = None, mode: str = "info"):
     
-        import asyncio
-        import time
-        coc_client.loop = asyncio.get_running_loop()
-
+        
         await interaction.response.defer()
         
         try:
@@ -71,7 +70,7 @@ class WarCommands(commands.Cog):
 
                 embed = discord.Embed(
                     title=f"{our.name} vs {opp.name}",
-                    description=f"**Type:** {source}\n**State:** {display_state}",
+                    description=f"**Type:** {source}\nClan Tag: `{our.tag}` | Opp. Tag: `{opp.tag}`",
                     color=embed_color
                 )
                 
@@ -93,27 +92,70 @@ class WarCommands(commands.Cog):
                 # CWL has 1 attack per person, Normal has 2
                 atks_per_person = 1 if is_cwl else 2
                 total_atks = war_data.team_size * atks_per_person
-                embed.add_field(name="Attacks", value=f"⚔️ {our.attacks_used} / {total_atks}", inline=False)
+                embed.add_field(name="Attacks Used", value=f"⚔️ {our.attacks_used} / {total_atks}", inline=False)
+
+                hours = war_data.end_time.seconds_until // 3600
+                minutes = (war_data.end_time.seconds_until % 3600) // 60
+                time_left = f"{hours}h {minutes}m"
+                embed.add_field(name="Time Remaining", value=f"⏳ {time_left}", inline=True)
+
+                end_date = format_month_day_year(war_data.end_time)
+                embed.add_field(name="End Date", value=end_date, inline=False)
                 
                 await interaction.followup.send(embed=embed)
                 # --- STATS MODE (YAML) ---
             elif mode.lower() == "stats":
+                # 1. Map opponent data
+                opp_th_map = {m.tag: m.town_hall for m in opp.members}
                 
-                # coc.py Clan objects have a 'members' attribute
-                members = our.members 
-
+                # Sort ALL members by strength first
+                our_sorted = sorted(our.members, key=lambda x: x.map_position)
+                opp_sorted = sorted(opp.members, key=lambda x: x.map_position)
+                
+                # 2. Slice to only get the active participants (e.g., top 15)
+                active_our = our_sorted[:war_data.team_size]
+                active_opp = opp_sorted[:war_data.team_size]
+                
+                # 3. Create a Relative Position Map (e.g., Tag -> 1, 2, 3... 15)
+                # This ensures your #32 roster player shows up as '#15' on the map
+                our_pos_map = {m.tag: i+1 for i, m in enumerate(active_our)}
+                opp_pos_map = {m.tag: i+1 for i, m in enumerate(active_opp)}
+                hours = war_data.end_time.seconds_until // 3600
+                minutes = (war_data.end_time.seconds_until % 3600) // 60
+                time_left = f"{hours}h {minutes}m"
+                
                 attacked, unattacked = [], []
                 
-                for m in members:
-                    # m.attacks is a list of WarAttack objects
+                for m in active_our:
                     atks = m.attacks 
+                    diff_str = ""
+                    current_rel_pos = our_pos_map[m.tag]
                     
+                    if atks:
+                        th_diffs = []
+                        mirr_diffs = []
+                        for a in atks:
+                            # TH Differential
+                            target_th = opp_th_map.get(a.defender_tag, m.town_hall)
+                            th_diff = target_th - m.town_hall
+                            th_diffs.append(f"{th_diff:+}")
+
+                            # Mirror Differential (Relative Position)
+                            # If our #15 hits their #15, it's +0
+                            target_rel_pos = opp_pos_map.get(a.defender_tag, current_rel_pos)
+                            mirr_diff = target_rel_pos - current_rel_pos
+                            mirr_diffs.append(f"{mirr_diff:+}")
+                        
+                        diff_str = f" TH:[{', '.join(th_diffs)}] Mirr:[{', '.join(mirr_diffs)}]"
+
                     entry = {
                         "name": m.name,
                         "th": m.town_hall,
                         "stars": sum(a.stars for a in atks),
                         "pct": sum(a.destruction for a in atks),
-                        "att": len(atks)
+                        "att": len(atks),
+                        "rel_pos": current_rel_pos, # This is the 1-15 number
+                        "diff": diff_str
                     }
                     
                     if entry["att"] > 0:
@@ -121,60 +163,39 @@ class WarCommands(commands.Cog):
                     else:
                         unattacked.append(entry)
 
-                # Sorting: Top performers first, then highest THs for those who haven't hit
-                attacked.sort(key=lambda e: (e["stars"], e["pct"]), reverse=True)
-                unattacked.sort(key=lambda e: (e["th"], e["name"]), reverse=True)
+                # Sort for the final display (1 through 15)
+                attacked.sort(key=lambda e: e["rel_pos"])
+                unattacked.sort(key=lambda e: e["rel_pos"])
 
-                # Build the text lines
-                display_state = str(war_data.state).capitalize()
-
-                
                 lines = [
-                    f"```yaml",
+                    "```yaml",
                     f"{source} War Stats — {our.name}",
-                    f"State: {display_state}",
-                    f"Total Attacks Used: {our.attacks_used} / {total_possible}",
+                    f"Total Attacks: {our.attacks_used} / {war_data.team_size * max_attacks}",
+                    f"Time Remaining: {time_left}",
                     ""
                 ]
 
                 if attacked:
                     lines.append("✅ Attacked")
-                    for i, e in enumerate(attacked, 1):
-                        lines.append(f"{i}. {e['name']}: {e['stars']}⭐, {round(e['pct'], 1)}% ({e['att']}/{max_attacks})")
+                    for e in attacked:
+                        lines.append(f"{e['rel_pos']:}. TH{e['th']} {e['name'].strip()}: {e['stars']}⭐, {round(e['pct'], 1)}% ({e['att']}/{max_attacks}){e['diff']}")
                 
                 if unattacked:
                     lines.append("\n❌ Not Attacked")
-                    for i, e in enumerate(unattacked, 1):
-                        lines.append(f"{i}. {e['name']}: TH{e['th']} (0/{max_attacks})")
+                    for e in unattacked:
+                        lines.append(f"{e['rel_pos']:}. TH{e['th']} {e['name']}")
                 
                 lines.append("```")
-
-                # Join lines and send (Discord has a 2000 character limit)
+                
+                # Character limit safety...
                 final_yaml = "\n".join(lines)
                 if len(final_yaml) > 2000:
-                    # If too long, send in two chunks
-                    half = len(lines) // 2
-                    await interaction.followup.send("\n".join(lines[:half]) + "```")
-                    await interaction.followup.send("```yaml\n" + "\n".join(lines[half:]))
+                    chunks = [final_yaml[i:i+1900] for i in range(0, len(final_yaml), 1900)]
+                    for chunk in chunks:
+                        await interaction.followup.send(chunk if chunk.endswith("```") else f"{chunk}```")
                 else:
                     await interaction.followup.send(final_yaml)
-            # --- MISSED ATTACKS MODE ---
-            elif mode.lower() == "missed":
-                max_atks = 1 if is_cwl else 2
-                missed_list = []
-
-                for m in our.members:
-                    if len(m.attacks) < max_atks:
-                        # We calculate how many they actually missed
-                        count = max_atks - len(m.attacks)
-                        missed_list.append(f"- {m.name} (Missed {count})")
-
-                if not missed_list:
-                    return await interaction.followup.send("Everyone used all their attacks.")
-
-                header = f"**Missed Attacks: {source} War vs {opp.name}**"
-                body = "\n".join(missed_list)
-                await interaction.followup.send(f"{header}\n{body}")
+           
 
         except Exception as e:
             await interaction.followup.send(f"Error: {e}")
@@ -496,8 +517,8 @@ class WarPatrol(commands.Cog):
                     
                     # Logic: Only ping if exactly ~4 hours or ~1 hour left
                     # (Adjusted range to catch the 30-minute loop interval)
-                    is_final_call = 1800 <= seconds_left <= 3600    # 30-60 mins left
-                    is_warning = 12600 <= seconds_left <= 14400     # 3.5-4 hours left
+                    is_final_call = 2280 <= seconds_left <= 3600  
+                    is_warning = 13080 <= seconds_left <= 14400
 
                     if not (is_final_call or is_warning):
                         continue
@@ -507,10 +528,16 @@ class WarPatrol(commands.Cog):
                     max_atks = 1 if is_cwl else 2
                     slacking_names = []
                     
-                    for m in war.clan.members:
+                    # Sort by map position and slice to active team size
+                    # This ensures the #32 roster player shows up correctly as #15
+                    our_sorted = sorted(war.clan.members, key=lambda x: x.map_position)
+                    active_lineup = our_sorted[:war.team_size]
+                    
+                    for i, m in enumerate(active_lineup, 1):
                         if len(m.attacks) < max_atks:
                             needed = max_atks - len(m.attacks)
-                            slacking_names.append(f"• **{m.name}** ({needed} left)")
+                            # This uses the clean 1-15 numbering we just built
+                            slacking_names.append(f"{i}. TH{m.town_hall} **{m.name}** ({needed} left)")
 
                     if not slacking_names:
                         continue 
@@ -519,7 +546,12 @@ class WarPatrol(commands.Cog):
                     # We convert war_channel_id back to int because it's stored as CHAR/String
                     channel = self.bot.get_channel(int(war_channel_id))
                     if not channel:
-                        continue
+                        try:
+                            # If get_channel fails, try fetching from API
+                            channel = await self.bot.fetch_channel(int(war_channel_id))
+                        except:
+                            print(f"⚠️ Could not find channel {war_channel_id} for guild {guild_id}")
+                            continue
 
                     time_label = "FINAL HOUR" if is_final_call else "4 HOURS LEFT"
                     
@@ -546,7 +578,9 @@ class WarPatrol(commands.Cog):
 
 # --- CRITICAL SETUP UPDATE ---
 async def setup(bot):
-    # This adds the slash commands
-    await bot.add_cog(WarCommands(bot))
-    # This adds the background reminder task
-    await bot.add_cog(WarPatrol(bot, coc_client))
+    # This ensures we get the client AFTER initialize_coc() has run
+    import config 
+    
+    # Pass config.coc_client to both
+    await bot.add_cog(WarCommands(bot, config.coc_client))
+    await bot.add_cog(WarPatrol(bot, config.coc_client))
