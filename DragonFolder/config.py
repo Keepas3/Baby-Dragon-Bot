@@ -58,10 +58,13 @@ db_connection = None
 def get_db_cursor():
     global db_connection
     try:
+        # Check if we need to reconnect
         if db_connection is None or not db_connection.is_connected():
             db_connection = connect_db()
+            print("✅ Database connected successfully.")
         return db_connection.cursor()
     except Exception as e:
-        # This will now print the REAL error to your Railway logs
-        print(f"CRITICAL DATABASE ERROR: {e}")
-        raise e  # This will force the bot to show the error in the logs
+        # This will now show the REAL error in your Railway 'Deploy Logs'
+        print(f"❌ DATABASE CONNECTION ERROR: {e}")
+        # Raising the error here prevents the 'NoneType' crash in Discord
+        raise e
