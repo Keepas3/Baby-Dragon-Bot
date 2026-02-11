@@ -56,17 +56,39 @@ def connect_db():
     )
 
 db_connection = None
-
 def get_db_cursor():
     global db_connection
     try:
-        # Check if we need to reconnect
-        if db_connection is None or not db_connection.is_connected():
+        # Ping the server to see if it's alive
+        db_connection.ping(reconnect=True, attempts=3, delay=1)
+    except:
+        # If ping fails, force a full reconnection
+        import mysql.connector
+        db_connection = mysql.connector.connect(**DB_CONFIG)
+    
+    return db_connection.cursor()
+def get_db_cursor():
+    global db_connection
+    try:
+        # 1. Check if it's None first
+        if db_connection is None:
             db_connection = connect_db()
-            print("✅ Database connected successfully.")
+            return db_connection.cursor()
+
+        # 2. Ping the database.
+        # reconnect=True will automatically try to fix a dropped connection.
+        # attempts=3 gives it a few tries if the network is jittery on Railway.
+        db_connection.ping(reconnect=True, attempts=3, delay=2)
+        
         return db_connection.cursor()
+
     except Exception as e:
-        # This will now show the REAL error in your Railway 'Deploy Logs'
-        print(f"❌ DATABASE CONNECTION ERROR: {e}")
-        # Raising the error here prevents the 'NoneType' crash in Discord
-        raise e
+        print(f"⚠️ Database Ping/Reconnect failed: {e}")
+        try:
+            # 3. Last Resort: Force a completely new connection
+            print("🔄 Attempting full database reset...")
+            db_connection = connect_db()
+            return db_connection.cursor()
+        except Exception as final_e:
+            print(f"❌ CRITICAL DATABASE FAILURE: {final_e}")
+            raise final_e

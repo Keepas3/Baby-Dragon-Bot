@@ -1,6 +1,8 @@
+
 import discord
 import time
-from discord.ext import commands
+import asyncio
+from discord.ext import commands, tasks
 from discord import app_commands, Embed
 
 # Import helpers from your toolbox
@@ -187,6 +189,8 @@ class ClanCommands(commands.Cog):
     async def lookup_member(self, interaction: discord.Interaction, user: discord.Member = None, username: str = None):
         await interaction.response.defer()
         try:
+            cursor = get_db_cursor() 
+            guild_id = str(interaction.guild.id)
             tag = fetch_clan_from_db(interaction.guild.id)
             clan_data = await get_clan_data(tag)
         except Exception as e:
@@ -323,6 +327,53 @@ class ClanCommands(commands.Cog):
                 await interaction.followup.send(embed=embed)
         except Exception as e:
             await interaction.followup.send(f"Error: {e}")
+
+class RaidPatrol(commands.Cog):
+    def __init__(self, bot, coc_client):
+        self.bot = bot
+        self.coc_client = coc_client
+        self.raid_check.start()
+
+    def cog_unload(self):
+        self.raid_check.cancel()
+
+    @tasks.loop(hours=6)
+    async def raid_check(self):
+        # Sunday is 6, Monday is 0. Capital raids usually end Monday morning.
+        now = discord.utils.utcnow()
+        if now.weekday() not in [6, 0]:
+            return
+
+        try:
+            cursor = get_db_cursor()
+            cursor.execute("SELECT clan_tag, war_channel_id FROM servers")
+            
+            for tag, channel_id in cursor.fetchall():
+                if not tag or not channel_id: continue
+
+                async for raid in self.coc_client.get_raid_log(tag, limit=1):
+                    if raid.state == "ongoing":
+                        # Filter for people with less than 6 attacks
+                        slackers = [f"• {m.name} ({m.attack_count}/6)" for m in raid.members if m.attack_count < 6]
+                        
+                        if slackers:
+                            channel = self.bot.get_channel(int(channel_id))
+                            if channel:
+                                embed = discord.Embed(
+                                    title="🏰 Capital Raid Reminder",
+                                    description="Raid Weekend is ending! Don't forget your **attacks**!",
+                                    color=0xFFCC00
+                                )
+                                # Join names, limiting to 20 to stay under character limits
+                                embed.add_field(name="Pending Hits", value="\n".join(slackers[:20]))
+                                await channel.send(embed=embed)
+                    break 
+        except Exception as e:
+            print(f"Raid Task Error: {e}")
+
+    @raid_check.before_loop
+    async def before_raid_check(self):
+        await self.bot.wait_until_ready()
 
 # Requirement for main.py loading
 async def setup(bot):
