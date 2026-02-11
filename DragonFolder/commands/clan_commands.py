@@ -328,45 +328,52 @@ class ClanCommands(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Error: {e}")
 
-class RaidPatrol(commands.Cog):
-    def __init__(self, bot, coc_client):
-        self.bot = bot
-        self.coc_client = coc_client
-        self.raid_check.start()
-
-    def cog_unload(self):
-        self.raid_check.cancel()
-
     @tasks.loop(hours=6)
     async def raid_check(self):
-        # Sunday is 6, Monday is 0. Capital raids usually end Monday morning.
-        now = discord.utils.utcnow()
-        if now.weekday() not in [6, 0]:
-            return
-
+        """Precise reminders at 24h and 6h remaining."""
         try:
             cursor = get_db_cursor()
-            cursor.execute("SELECT clan_tag, war_channel_id FROM servers")
+            cursor.execute("SELECT clan_tag, raid_channel_id FROM servers")
             
-            for tag, channel_id in cursor.fetchall():
-                if not tag or not channel_id: continue
+            for tag, raid_channel_id in cursor.fetchall():
+                if not tag or not raid_channel_id: continue
 
                 async for raid in self.coc_client.get_raid_log(tag, limit=1):
-                    if raid.state == "ongoing":
-                        # Filter for people with less than 6 attacks
-                        slackers = [f"• {m.name} ({m.attack_count}/6)" for m in raid.members if m.attack_count < 6]
+                    if raid.state != "ongoing":
+                        break
+                    
+                    seconds_left = raid.end_time.seconds_until
+                    
+                    # --- THE WINDOWS ---
+                    # Window 1: 24 Hours Left (Interval: 18h to 24.5h)
+                    is_24h_call = 64800 <= seconds_left <= 88200
+                    
+                    # Window 2: 6 Hours Left (Interval: 0.5h to 7h)
+                    is_6h_call = 1800 <= seconds_left <= 25200
+
+                    if not (is_24h_call or is_6h_call):
+                        continue
+
+                    # Identify Slackers
+                    slackers = [f"• **{m.name}** ({m.attack_count}/6)" for m in raid.members if m.attack_count < 6]
+                    
+                    if slackers:
+                        channel = self.bot.get_channel(int(raid_channel_id))
+                        if not channel:
+                            try: channel = await self.bot.fetch_channel(int(raid_channel_id))
+                            except: continue
+
+                        time_label = "24 HOURS REMAINING" if is_24h_call else "🚨 FINAL 6 HOURS"
                         
-                        if slackers:
-                            channel = self.bot.get_channel(int(channel_id))
-                            if channel:
-                                embed = discord.Embed(
-                                    title="🏰 Capital Raid Reminder",
-                                    description="Raid Weekend is ending! Don't forget your **attacks**!",
-                                    color=0xFFCC00
-                                )
-                                # Join names, limiting to 20 to stay under character limits
-                                embed.add_field(name="Pending Hits", value="\n".join(slackers[:20]))
-                                await channel.send(embed=embed)
+                        embed = discord.Embed(
+                            title=f"🏰 {time_label}: Capital Raid",
+                            description="Finish your attacks for more clan medals!",
+                            color=0xFFCC00 if is_24h_call else 0xFF4500 # Yellow then Orange/Red
+                        )
+                        embed.add_field(name="Pending Hits", value="\n".join(slackers[:20]))
+                        embed.set_footer(text=f"Total Loot So Far: {raid.capital_resources_looted:,}")
+                        
+                        await channel.send(embed=embed)
                     break 
         except Exception as e:
             print(f"Raid Task Error: {e}")

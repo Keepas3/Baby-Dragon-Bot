@@ -31,13 +31,17 @@ class BotCommands(commands.Cog):
         cursor = get_db_cursor()
         guild_id = str(interaction.guild.id)
         
-        # 1. Fetch Server Settings (Clan + Channel)
-        cursor.execute("SELECT clan_tag, war_channel_id FROM servers WHERE guild_id = %s", (guild_id,))
+        # 1. Fetch Server Settings (Clan + War Channel + Raid Channel)
+        # We now pull the 3rd index: raid_channel_id
+        cursor.execute("SELECT clan_tag, war_channel_id, raid_channel_id FROM servers WHERE guild_id = %s", (guild_id,))
         row = cursor.fetchone()
         
+        # Handling the data from the row
         clan_tag = row[0] if row and row[0] else "❌ No clan tag set"
-        # Format the channel ID into a mention: <#123456789>
-        channel_mention = f"<#{row[1]}>" if row and row[1] else "❌ No reminder channel set"
+        
+        # Format the channel mentions
+        war_mention = f"<#{row[1]}>" if row and row[1] else "❌ No war channel set"
+        raid_mention = f"<#{row[2]}>" if row and row[2] else "❌ No raid channel set"
 
         # 2. Fetch Linked Players
         cursor.execute("SELECT discord_username, player_tag FROM players WHERE guild_id = %s", (guild_id,))
@@ -51,42 +55,75 @@ class BotCommands(commands.Cog):
             timestamp=interaction.created_at
         )
         
-        embed.add_field(name="Current Clan", value=f"`{clan_tag}`", inline=True)
-        embed.add_field(name="Reminder Channel", value=channel_mention, inline=True)
+        embed.add_field(name="Current Clan", value=f"`{clan_tag}`", inline=False)
+        embed.add_field(name="⚔️ War Reminders", value=war_mention, inline=True)
+        embed.add_field(name="🏰 Raid Reminders", value=raid_mention, inline=True)
         
-        
+        # Add a status check for the loops to make it feel "live"
+        loop_status = "✅ Active" if self.war_reminder.is_running() else "⚠️ Stopped"
+        embed.add_field(name="Bot Patrol Status", value=loop_status, inline=False)
+
         embed.add_field(name="Linked Members", value=player_info, inline=False)
         
         embed.set_footer(text=f"Serving {len(self.bot.guilds)} servers | {len(self.bot.users)} users")
         
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name='setclantag', description="Set the clan tag and reminder channel")
-    @app_commands.describe(new_tag="The #ClanTag", channel="Optional: Channel for war reminders")
-    async def set_clan_tag(self, interaction: discord.Interaction, new_tag: str, channel: discord.TextChannel = None):
+    @app_commands.command(name='setclantag', description="Set the clan tag and optional reminder channels")
+    @app_commands.describe(
+        new_tag="The #ClanTag", 
+        war_channel="Optional: Channel for war reminders",
+        raid_channel="Optional: Channel for capital raid reminders"
+    )
+    async def set_clan_tag(
+        self, 
+        interaction: discord.Interaction, 
+        new_tag: str, 
+        war_channel: discord.TextChannel = None,
+        raid_channel: discord.TextChannel = None
+    ):
         clean_tag = new_tag.strip().upper()
-        if not clean_tag.startswith("#"): clean_tag = f"#{clean_tag}"
+        if not clean_tag.startswith("#"): 
+            clean_tag = f"#{clean_tag}"
         
-        # 1. Use the selected channel, or the current one if none was picked
-        target_channel_id = str(channel.id) if channel else str(interaction.channel.id)
+        # 1. Validate the Tag with CoC API
+        if not await check_coc_clan_tag(clean_tag):
+            return await interaction.response.send_message("❌ Invalid Clan Tag. Please check the tag in-game.", ephemeral=True)
+
+        cursor = get_db_cursor()
+        guild_id = str(interaction.guild.id)
         
-        if await check_coc_clan_tag(clean_tag):
-            cursor = get_db_cursor()
-            # 2. Upsert (Update or Insert) the tag AND the channel ID
-            cursor.execute("""
-                INSERT INTO servers (guild_id, guild_name, clan_tag, war_channel_id)
-                VALUES (%s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE 
-                    clan_tag = VALUES(clan_tag), 
-                    war_channel_id = VALUES(war_channel_id),
-                    guild_name = VALUES(guild_name)
-            """, (str(interaction.guild.id), interaction.guild.name, clean_tag, target_channel_id))
-            
-            await interaction.response.send_message(
-                f"✅ **Linked!**\nClan: **{clean_tag}**\nReminders will be sent to <#{target_channel_id}>"
-            )
-        else:
-            await interaction.response.send_message("Invalid Clan Tag.", ephemeral=True)
+        # 2. Advanced Upsert Logic
+        # We use COALESCE in the UPDATE section. 
+        # This says: "If the new value is NULL, keep the old value that's already in the table."
+        
+        sql = """
+            INSERT INTO servers (guild_id, guild_name, clan_tag, war_channel_id, raid_channel_id)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE 
+                clan_tag = VALUES(clan_tag),
+                guild_name = VALUES(guild_name),
+                war_channel_id = COALESCE(VALUES(war_channel_id), war_channel_id),
+                raid_channel_id = COALESCE(VALUES(raid_channel_id), raid_channel_id)
+        """
+        
+        # Convert objects to string IDs only if they were provided
+        war_id = str(war_channel.id) if war_channel else None
+        raid_id = str(raid_channel.id) if raid_channel else None
+        
+        cursor.execute(sql, (guild_id, interaction.guild.name, clean_tag, war_id, raid_id))
+
+        # 3. Build a nice confirmation message
+        msg = f"✅ **Clan Linked:** `{clean_tag}`\n"
+        if war_channel:
+            msg += f"⚔️ War Reminders: {war_channel.mention}\n"
+        if raid_channel:
+            msg += f"🏰 Raid Reminders: {raid_channel.mention}\n"
+        
+        if not war_channel and not raid_channel:
+            msg += "*(Reminder channels were not changed)*"
+
+        await interaction.response.send_message(msg)
 
     @app_commands.command(name='link', description="Link your CoC account")
     async def link(self, interaction: discord.Interaction, player_tag: str):

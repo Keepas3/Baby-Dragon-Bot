@@ -518,7 +518,7 @@ class WarPatrol(commands.Cog):
                     # Logic: Only ping if exactly ~4 hours or ~1 hour left
                     # (Adjusted range to catch the 30-minute loop interval)
                     is_final_call = 2280 <= seconds_left <= 3600  
-                    is_warning = 13080 <= seconds_left <= 14400
+                    is_warning = 13200 <= seconds_left <= 14400
 
                     if not (is_final_call or is_warning):
                         continue
