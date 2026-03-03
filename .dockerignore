@@ -1,4 +1,23 @@
+# Virtual Environments (Railway builds its own)
 .venv/
-__pycache__/
+venv/
+env/
+
+# Python Cache
+**/__pycache__/
+*.py[cod]
+
+# Environment Secrets (Railway uses its own Dashboard Variables)
 .env
+
+# Git metadata (Docker doesn't need your commit history)
 .git/
+.gitignore
+
+# Local IDE settings
+.vscode/
+.idea/
+
+# OS-specific files
+.DS_Store
+Thumbs.db

@@ -2,7 +2,7 @@ import os
 import sys
 import asyncio
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 # 1. Path Setup
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -50,6 +50,20 @@ async def setup():
         
         # 3. Final step: Launch the bot
         await bot.start(TOKEN) 
+
+@tasks.loop(minutes=10)
+async def db_heartbeat():
+    """Keeps the Railway MySQL instance warm with minimal credit usage."""
+    try:
+        # Import your getter from config
+        from config import get_db_cursor
+        
+        cursor = get_db_cursor()
+        cursor.execute("SELECT 1") # The smallest possible query
+        cursor.close()
+        # Optional: print("💓 DB Heartbeat: Stayin' Alive") 
+    except Exception as e:
+        print(f"⚠️ Heartbeat failed: {e}")
 
 # --- BOT EVENTS ---
 

@@ -309,11 +309,12 @@ class WarCommands(commands.Cog):
                 clan_stars = entry.clan.stars
                 if entry.opponent:
                     opp_name = entry.opponent.name
-                    opp_tag =  entry.opponent.tag
+                    opp_tag = entry.opponent.tag if entry.opponent.tag else "cWL"
                     
                 else:
                     opp_name = "CWL"
                     opp_stars = "__"
+                    opp_tag = entry.opponent.tag if entry.opponent.tag else "cWL"
                 
                 CWL_rounds = 7
                 clan_destruction = round(entry.clan.destruction, 2)

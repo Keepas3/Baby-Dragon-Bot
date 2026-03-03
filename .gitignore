@@ -1,3 +1,17 @@
+# Virtual Environments
 .venv/
-.DragonFolder/__pycache__/
+venv/
+env/
+
+# Python Cache
 __pycache__/
+*.py[cod]
+*$py.class
+.DragonFolder/__pycache__/
+
+# Environment Secrets
+.env
+
+# OS-specific files
+.DS_Store
+Thumbs.db

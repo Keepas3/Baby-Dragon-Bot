@@ -28,46 +28,53 @@ class BotCommands(commands.Cog):
 
     @app_commands.command(name="botstatus", description="Get the server configuration and status")
     async def server_status(self, interaction: discord.Interaction):
-        cursor = get_db_cursor()
-        guild_id = str(interaction.guild.id)
+        await interaction.response.defer()
         
-        # 1. Fetch Server Settings (Clan + War Channel + Raid Channel)
-        # We now pull the 3rd index: raid_channel_id
-        cursor.execute("SELECT clan_tag, war_channel_id, raid_channel_id FROM servers WHERE guild_id = %s", (guild_id,))
-        row = cursor.fetchone()
-        
-        # Handling the data from the row
-        clan_tag = row[0] if row and row[0] else "❌ No clan tag set"
-        
-        # Format the channel mentions
-        war_mention = f"<#{row[1]}>" if row and row[1] else "❌ No war channel set"
-        raid_mention = f"<#{row[2]}>" if row and row[2] else "❌ No raid channel set"
+        try:
+            cursor = get_db_cursor()
+            guild_id = str(interaction.guild.id)
+            
+            cursor.execute("SELECT clan_tag, war_channel_id, raid_channel_id FROM servers WHERE guild_id = %s", (guild_id,))
+            row = cursor.fetchone()
+            
+            # 1. Improved Safely check if row exists
+            if row:
+                clan_tag = f"`{row[0]}`" if row[0] else "❌ No clan tag set"
+                war_mention = f"<#{row[1]}>" if row[1] else "❌ No war channel set"
+                raid_mention = f"<#{row[2]}>" if row[2] else "❌ No raid channel set"
+            else:
+                clan_tag = "❌ Not Configured"
+                war_mention = "❌ Run /setclantag"
+                raid_mention = "❌ Run /setclantag"
 
-        # 2. Fetch Linked Players
-        cursor.execute("SELECT discord_username, player_tag FROM players WHERE guild_id = %s", (guild_id,))
-        players = cursor.fetchall()
-        player_info = "\n".join([f"• @{u} ({t})" for u, t in players]) if players else "No linked players."
+            # 2. Fetch Linked Players
+            cursor.execute("SELECT discord_username, player_tag FROM players WHERE guild_id = %s", (guild_id,))
+            players = cursor.fetchall()
+            player_info = "\n".join([f"• @{u} ({t})" for u, t in players]) if players else "No linked players."
 
-        # 3. Build the Polished Embed
-        embed = discord.Embed(
-            title=f"🛡️ {interaction.guild.name} Configuration",
-            color=0x3498db,
-            timestamp=interaction.created_at
-        )
-        
-        embed.add_field(name="Current Clan", value=f"`{clan_tag}`", inline=False)
-        embed.add_field(name="⚔️ War Reminders", value=war_mention, inline=True)
-        embed.add_field(name="🏰 Raid Reminders", value=raid_mention, inline=True)
-        
-        # Add a status check for the loops to make it feel "live"
-        loop_status = "✅ Active" if self.war_reminder.is_running() else "⚠️ Stopped"
-        embed.add_field(name="Bot Patrol Status", value=loop_status, inline=False)
+            # 3. Build the Polished Embed
+            embed = discord.Embed(
+                title=f"🛡️ {interaction.guild.name} Configuration",
+                color=0x3498db,
+                timestamp=interaction.created_at
+            )
+            
+            embed.add_field(name="Current Clan", value=f"`{clan_tag}`", inline=False)
+            embed.add_field(name="⚔️ War Reminders", value=war_mention, inline=True)
+            embed.add_field(name="🏰 Raid Reminders", value=raid_mention, inline=True)
+            
+            # Add a status check for the loops to make it feel "live"
+            loop_status = "✅ Active" if self.war_reminder.is_running() else "⚠️ Stopped"
+            embed.add_field(name="Bot Patrol Status", value=loop_status, inline=False)
 
-        embed.add_field(name="Linked Members", value=player_info, inline=False)
-        
-        embed.set_footer(text=f"Serving {len(self.bot.guilds)} servers | {len(self.bot.users)} users")
-        
-        await interaction.response.send_message(embed=embed)
+            embed.add_field(name="Linked Members", value=player_info, inline=False)
+            
+            embed.set_footer(text=f"Serving {len(self.bot.guilds)} servers | {len(self.bot.users)} users")
+            
+            await interaction.response.send_message(embed=embed)
+        except Exception as e:
+            print(f"Error in botstatus: {e}")
+            await interaction.followup.send(f"❌ Error fetching status: `{e}`")
 
     @app_commands.command(name='setclantag', description="Set the clan tag and optional reminder channels")
     @app_commands.describe(
