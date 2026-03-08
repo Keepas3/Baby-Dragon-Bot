@@ -484,30 +484,28 @@ class WarPatrol(commands.Cog):
 
     @tasks.loop(minutes=20)
     async def war_reminder(self):
-        """Background task to check all linked clans for pending attacks."""
-        
-        
         try:
             cursor = get_db_cursor()
-            # 1. Pull the specific reminder channel for EACH server
             cursor.execute("SELECT clan_tag, guild_id, war_channel_id FROM servers")
             tracked_clans = cursor.fetchall()
 
             for clan_tag, guild_id, war_channel_id in tracked_clans:
                 if not clan_tag or not war_channel_id:
-                    continue # Skip servers that haven't run /setclantag yet
+                    continue 
 
                 try:
-                    # 2. Fetch war data (Normal or CWL)
+                    # 1. Fetch war data
                     war = await self.coc_client.get_current_war(clan_tag)
                     
-                    # If not in normal war, check if it's CWL
+                    # 2. CWL Round Check
                     if not war or war.state == "notInWar":
                         group = await self.coc_client.get_league_group(clan_tag)
                         if group and group.state != "ended":
                             async for cwl_war in group.get_wars_for_clan(clan_tag):
                                 if cwl_war.state == "inWar":
                                     war = cwl_war
+                                    # --- ADD THIS: FORCE THE CWL FLAG ---
+                                    setattr(war, 'is_league_entry', True)
                                     break
                     
                     if not war or war.state != "inWar":
@@ -515,55 +513,73 @@ class WarPatrol(commands.Cog):
 
                     # 3. Check time remaining
                     seconds_left = war.end_time.seconds_until
-                    
-                    # Logic: Only ping if exactly ~4 hours or ~1 hour left
-                    # (Adjusted range to catch the 30-minute loop interval)
                     is_final_call = 2280 <= seconds_left <= 3600  
                     is_warning = 13200 <= seconds_left <= 14400
 
                     if not (is_final_call or is_warning):
                         continue
 
-                    # 4. Identify Slackers
-                    is_cwl = getattr(war, 'is_league_entry', False)
+                    # 4. BULLETPROOF DETECTION
+                    # Combines all possible ways coc.py flags a CWL war
+                    is_cwl = any([
+                        getattr(war, 'is_league_entry', False),
+                        hasattr(war, 'war_tag'),
+                        "league" in str(type(war)).lower()
+                    ])
+                    
                     max_atks = 1 if is_cwl else 2
                     slacking_names = []
                     
-                    # Sort by map position and slice to active team size
-                    # This ensures the #32 roster player shows up correctly as #15
+                    # 5. Identify Slackers
                     our_sorted = sorted(war.clan.members, key=lambda x: x.map_position)
                     active_lineup = our_sorted[:war.team_size]
                     
                     for i, m in enumerate(active_lineup, 1):
                         if len(m.attacks) < max_atks:
                             needed = max_atks - len(m.attacks)
-                            # This uses the clean 1-15 numbering we just built
                             slacking_names.append(f"{i}. TH{m.town_hall} **{m.name}** ({needed} left)")
 
                     if not slacking_names:
                         continue 
 
-                    # 5. POST TO THE SAVED CHANNEL
-                    # We convert war_channel_id back to int because it's stored as CHAR/String
+                    # 6. Post Reminder
                     channel = self.bot.get_channel(int(war_channel_id))
                     if not channel:
                         try:
-                            # If get_channel fails, try fetching from API
                             channel = await self.bot.fetch_channel(int(war_channel_id))
                         except:
-                            print(f"⚠️ Could not find channel {war_channel_id} for guild {guild_id}")
                             continue
 
+                    # ... (previous logic for fetching war and slackers) ...
+
                     time_label = "FINAL HOUR" if is_final_call else "4 HOURS LEFT"
+                    source_label = "CWL" if is_cwl else "Normal War"
                     
+                    # 1. Determine the color based on who is winning
+                    if war.clan.stars > war.opponent.stars:
+                        embed_color = 0x00ff00 # Green (Winning)
+                    elif war.clan.stars < war.opponent.stars:
+                        embed_color = 0xff0000 # Red (Losing)
+                    else:
+                        embed_color = 0xffff00 # Yellow (Tied)
+
                     embed = discord.Embed(
                         title=f"⚔️ {time_label}: War Attack Reminder",
                         description=f"Clan: **{war.clan.name}** vs **{war.opponent.name}**\n"
                                     f"Please use your remaining hits before the war ends!",
-                        color=0xff0000 if is_final_call else 0xffa500
+                        color=embed_color
                     )
+
+                    # 2. Add the Scoreboard field at the top
+                    scoreboard = (
+                        f"**{war.clan.name}**: ⭐ {war.clan.stars} ({war.clan.destruction:.1f}%)\n"
+                        f"**{war.opponent.name}**: ⭐ {war.opponent.stars} ({war.opponent.destruction:.1f}%)"
+                    )
+                    embed.add_field(name="📊 Current Score", value=scoreboard, inline=False)
+
+                    # 3. Add the slackers below the score
                     embed.add_field(name="Pending Attacks", value="\n".join(slacking_names))
-                    embed.set_footer(text=f"War Type: {'CWL' if is_cwl else 'Normal War'}")
+                    embed.set_footer(text=f"War Type: {source_label}")
                     
                     await channel.send(embed=embed)
 

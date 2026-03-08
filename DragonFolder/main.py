@@ -51,19 +51,18 @@ async def setup():
         # 3. Final step: Launch the bot
         await bot.start(TOKEN) 
 
-@tasks.loop(minutes=10)
+@tasks.loop(minutes=15)
 async def db_heartbeat():
-    """Keeps the Railway MySQL instance warm with minimal credit usage."""
+    """Keeps the Railway MySQL instance warm every 15 mins """
     try:
-        # Import your getter from config
         from config import get_db_cursor
         
         cursor = get_db_cursor()
-        cursor.execute("SELECT 1") # The smallest possible query
+        cursor.execute("SELECT 1") 
         cursor.close()
-        # Optional: print("💓 DB Heartbeat: Stayin' Alive") 
     except Exception as e:
-        print(f"⚠️ Heartbeat failed: {e}")
+        # If this fails, it usually means the DB is currently restarting
+        print(f"⚠️ Heartbeat: Database is likely rebooting... {e}")
 
 # --- BOT EVENTS ---
 
