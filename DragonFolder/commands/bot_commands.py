@@ -26,6 +26,65 @@ class BotCommands(commands.Cog):
         result = "Heads!!!" if random.randint(1, 2) == 1 else "Tails!!!"
         await interaction.response.send_message(f"The coin flips to... {result}")
 
+    @app_commands.command(name="help", description="Displays all available Baby Dragon Bot commands")
+    async def help_command(self, interaction: discord.Interaction):
+        """Sends an organized embed of all bot capabilities."""
+        embed = discord.Embed(
+            title="Baby Dragon Bot: Command Guide",
+            description="Use the commands below to manage your clan and track progress!",
+            color=0x00FF00,
+            timestamp=interaction.created_at
+        )
+
+        # 🛡️ Clans Category
+        embed.add_field(
+            name="🛡️ Clan Management",
+            value=(
+                "`/claninfo` - General clan overview\n"
+                "`/clanmembers` - Members ranked by leagues\n"
+                "`/clansearch` - Search for a clan by name\n"
+                "`/capitalraid` - Current Raid Weekend progress\n"
+                "`/previousraids` - History of past Raid seasons\n"
+                "`/currentwar` - Stats & Info for War/CWL\n"
+                "`/warlog` - Check recent war history\n"
+                "`/cwlprep` - Scouts out CWL opponent levels\n"
+                "`/cwlschedule` - View CWL rounds and opponents"
+                "`/cwlclansearch` - Scouts out CWL opponent levels\n"
+            ),
+            inline=False
+        )
+
+        # ⚔️ Players Category
+        embed.add_field(
+            name="⚔️ Player Tools",
+            value=(
+                "`/playerinfo` - General stats and hero levels\n"
+                "`/playertroops` - Troop & Siege levels\n"
+                "`/playerequipments` - Hero Equipment progress\n"
+                "`/playerspells` - Spell levels"
+                "`/searchmember` - Search for a player's information from current clan\n"
+            ),
+            inline=False
+        )
+
+        # ⚙️ Configuration & Admin
+        embed.add_field(
+            name="⚙️ Settings & Admin",
+            value=(
+                "`/setclantag` - Link clan to server & set reminder channels\n"
+                "`/disable_reminders` - Mute War or Raid pings; only for admins\n"
+                "`/botstatus` - View current server config\n"
+                "`/link` / `/unlink` - Connect your CoC tag to Discord Server\n"
+            ),
+            inline=False
+        )
+
+        embed.set_footer(text="Tip: To get your bot configured, start with /setclantag and then /botstatus to see your setup!")
+        
+        # Using simple response since we don't need to defer for a static embed
+        await interaction.response.send_message(embed=embed)
+
+    
     @app_commands.command(name="botstatus", description="Get the server configuration and status")
     async def server_status(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -39,18 +98,19 @@ class BotCommands(commands.Cog):
             
             # 1. Improved Safely check if row exists
             if row:
-                clan_tag = f"`{row[0]}`" if row[0] else "❌ No clan tag set"
-                war_mention = f"<#{row[1]}>" if row[1] else "❌ No war channel set"
-                raid_mention = f"<#{row[2]}>" if row[2] else "❌ No raid channel set"
+                clan_tag = row[0] if row[0] else "None"
+                
+                war_mention = f"<#{row[1]}>" 
+                raid_mention = f"<#{row[2]}>"
             else:
-                clan_tag = "❌ Not Configured"
-                war_mention = "❌ Run /setclantag"
-                raid_mention = "❌ Run /setclantag"
+                clan_tag = "`❌ Run /setclantag to configure`"
+                war_mention = "`❌ Not Configured`"
+                raid_mention = "`❌ Not Configured`"
 
             # 2. Fetch Linked Players
             cursor.execute("SELECT discord_username, player_tag FROM players WHERE guild_id = %s", (guild_id,))
             players = cursor.fetchall()
-            player_info = "\n".join([f"• @{u} ({t})" for u, t in players]) if players else "No linked players."
+            player_info = "\n".join([f"• @{u} (`{t}`)" for u, t in players]) if players else "` No Linked Members `"
 
             # 3. Build the Polished Embed
             embed = discord.Embed(
@@ -63,15 +123,12 @@ class BotCommands(commands.Cog):
             embed.add_field(name="⚔️ War Reminders", value=war_mention, inline=True)
             embed.add_field(name="🏰 Raid Reminders", value=raid_mention, inline=True)
             
-            # Add a status check for the loops to make it feel "live"
-            loop_status = "✅ Active" if self.war_reminder.is_running() else "⚠️ Stopped"
-            embed.add_field(name="Bot Patrol Status", value=loop_status, inline=False)
 
             embed.add_field(name="Linked Members", value=player_info, inline=False)
             
             embed.set_footer(text=f"Serving {len(self.bot.guilds)} servers | {len(self.bot.users)} users")
             
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
         except Exception as e:
             print(f"Error in botstatus: {e}")
             await interaction.followup.send(f"❌ Error fetching status: `{e}`")
@@ -157,5 +214,37 @@ class BotCommands(commands.Cog):
             await interaction.response.send_message("❌ You don't have an account linked in this server.", ephemeral=True)
 
     
+    @app_commands.command(name="disable_reminders", description="Turn off specific background reminders")
+    @app_commands.describe(type="Choose which reminder to disable")
+    @app_commands.choices(type=[
+        app_commands.Choice(name="⚔️ War Reminders", value="war"),
+        app_commands.Choice(name="🏰 Raid Reminders", value="raid"),
+        app_commands.Choice(name="🚫 Both", value="both")
+    ])
+    @app_commands.checks.has_permissions(administrator=True)
+    async def disable_reminders(self, interaction: discord.Interaction, type: str):
+        await interaction.response.defer(ephemeral=True)
+        
+        cursor = get_db_cursor()
+        guild_id = str(interaction.guild.id)
+        
+        if type == "war":
+            sql = "UPDATE servers SET war_channel_id = NULL WHERE guild_id = %s"
+            label = "⚔️ War Reminders"
+        elif type == "raid":
+            sql = "UPDATE servers SET raid_channel_id = NULL WHERE guild_id = %s"
+            label = "🏰 Raid Reminders"
+        else:
+            sql = "UPDATE servers SET war_channel_id = NULL, raid_channel_id = NULL WHERE guild_id = %s"
+            label = "⚔️ War and 🏰 Raid Reminders"
+
+        try:
+            cursor.execute(sql, (guild_id,))
+            # commit is usually handled inside get_db_cursor or at the end of execution
+            
+            await interaction.followup.send(f"✅ {label} have been disabled for this server.")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Failed to update settings: {e}")
+
 async def setup(bot):
     await bot.add_cog(BotCommands(bot))

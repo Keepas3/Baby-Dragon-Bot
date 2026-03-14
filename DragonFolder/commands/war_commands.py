@@ -17,7 +17,11 @@ class WarCommands(commands.Cog):
         self.coc_client = coc_client # Store it
 
     @app_commands.command(name="currentwar", description="Get info or member stats for current war")
-    @app_commands.describe(wartag="Tag for a specific CWL war", mode="info (Overview) or stats (Member details)")
+    @app_commands.describe(wartag="Tag for a specific CWL war", mode="Choose: info (Overview) or stats (Member details)")
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="Overall Information of War Results", value="info"),
+        app_commands.Choice(name="Shows each member's attacks, stars, and destruction", value="stats")
+    ])
     async def currentwar(self, interaction: discord.Interaction, wartag: str = None, mode: str = "info"):
     
         
@@ -48,7 +52,11 @@ class WarCommands(commands.Cog):
 
             # --- DYNAMIC TYPE DETECTION ---
             # We check if it's CWL by looking for league-specific properties
-            is_cwl = getattr(war_data, 'is_league_entry', False) or hasattr(war_data, 'war_tag')
+            # is_cwl = getattr(war_data, 'is_league_entry', False) or hasattr(war_data, 'war_tag')
+            # source = "CWL" if is_cwl else "Normal War"
+        
+            is_cwl = "League" in str(type(war_data))
+            
             source = "CWL" if is_cwl else "Normal War"
 
             # Ensure our clan is always 'our'
@@ -64,9 +72,14 @@ class WarCommands(commands.Cog):
                 display_state = str(war_data.state).capitalize()
                 
                 # Determine color based on stars
-                if our.stars > opp.stars: embed_color = 0x00ff00 # Green
-                elif our.stars < opp.stars: embed_color = 0xff0000 # Red
-                else: embed_color = 0xffff00 # Yellow
+                if war_data.state == "preparation":
+                    embed_color = 0xffff00 #yellow for prep
+                elif our.stars > opp.stars: 
+                    embed_color = 0x00ff00 # Green
+                elif our.stars < opp.stars: 
+                    embed_color = 0xff0000 # Red
+                    
+                else: embed_color = 0x3498db # blue for draw or unknown
 
                 embed = discord.Embed(
                     title=f"{our.name} vs {opp.name}",
@@ -78,29 +91,37 @@ class WarCommands(commands.Cog):
                 if is_cwl and hasattr(war_data, 'war_tag'):
                     embed.set_footer(text=f"CWL War Tag: {war_data.war_tag}")
 
-                embed.add_field(name="Clan Stars", value=f"⭐ {our.stars}/{our.max_stars}", inline=True)
+                embed.add_field(name="Clan Stars", value=f"⭐ `{our.stars}/{our.max_stars}`", inline=True)
                 embed.add_field(name="Clan Attacks Used", value=f"`{our.attacks_used}/{total_possible}`", inline=True)
-                embed.add_field(name="Clan Destruction", value=f"💥 {round(our.destruction, 1)}%/100%", inline=True)
+                embed.add_field(name="Clan Destruction", value=f"💥 `{round(our.destruction, 1)}%/100%`", inline=True)
 
                 # embed.add_field(name="Stars", value=f"⭐ {our.stars} - {opp.stars}", inline=True)
                 # embed.add_field(name="Destruction", value=f"💥 {round(our.destruction, 1)}% - {round(opp.destruction, 1)}%", inline=True)
                 
-                embed.add_field(name="Clan Stars", value=f"⭐ {opp.stars}/{opp.max_stars}", inline=True)
+                embed.add_field(name="Clan Stars", value=f"⭐ `{opp.stars}/{opp.max_stars}`", inline=True)
                 embed.add_field(name="Clan Attacks Used", value=f"`{opp.attacks_used}/{total_possible}`", inline=True)
-                embed.add_field(name="Clan Destruction", value=f"💥 {round(opp.destruction, 1)}%/100%", inline=True)
+                embed.add_field(name="Clan Destruction", value=f"💥 `{round(opp.destruction, 1)}%/100%`", inline=True)
 
                 # CWL has 1 attack per person, Normal has 2
                 atks_per_person = 1 if is_cwl else 2
                 total_atks = war_data.team_size * atks_per_person
-                embed.add_field(name="Attacks Used", value=f"⚔️ {our.attacks_used} / {total_atks}", inline=False)
+                embed.add_field(name="Attacks Used", value=f"⚔️ `{our.attacks_used} / {total_atks}`", inline=False)
 
-                hours = war_data.end_time.seconds_until // 3600
-                minutes = (war_data.end_time.seconds_until % 3600) // 60
-                time_left = f"{hours}h {minutes}m"
-                embed.add_field(name="Time Remaining", value=f"⏳ {time_left}", inline=True)
+                # --- Dynamic Time Logic ---
+                if war_data.state == "preparation":
+                    time_diff = war_data.start_time.seconds_until
+                    label = "War Starts In"
+                else:
+                    time_diff = war_data.end_time.seconds_until
+                    label = "Time Remaining"
+
+                hours, minutes = time_diff // 3600, (time_diff % 3600) // 60
+                time_str = f"⏳ {hours}h {minutes}m"
+
+                embed.add_field(name=label, value=f"`{time_str}`", inline=True)
 
                 end_date = format_month_day_year(war_data.end_time)
-                embed.add_field(name="End Date", value=end_date, inline=False)
+                embed.add_field(name="`War Ends`", value=f"`{end_date}`", inline=False)
                 
                 await interaction.followup.send(embed=embed)
                 # --- STATS MODE (YAML) ---
@@ -108,53 +129,45 @@ class WarCommands(commands.Cog):
                 # 1. Map opponent data
                 opp_th_map = {m.tag: m.town_hall for m in opp.members}
                 
-                # Sort ALL members by strength first
                 our_sorted = sorted(our.members, key=lambda x: x.map_position)
-                opp_sorted = sorted(opp.members, key=lambda x: x.map_position)
-                
-                # 2. Slice to only get the active participants (e.g., top 15)
                 active_our = our_sorted[:war_data.team_size]
-                active_opp = opp_sorted[:war_data.team_size]
                 
-                # 3. Create a Relative Position Map (e.g., Tag -> 1, 2, 3... 15)
-                # This ensures your #32 roster player shows up as '#15' on the map
-                our_pos_map = {m.tag: i+1 for i, m in enumerate(active_our)}
-                opp_pos_map = {m.tag: i+1 for i, m in enumerate(active_opp)}
-                hours = war_data.end_time.seconds_until // 3600
-                minutes = (war_data.end_time.seconds_until % 3600) // 60
-                time_left = f"{hours}h {minutes}m"
+                # --- Dynamic Timer for Stats Header ---
+                if war_data.state.value == "preparation":
+                    time_diff = war_data.start_time.seconds_until
+                    timer_label = "Battle Starts In"
+                else:
+                    time_diff = war_data.end_time.seconds_until
+                    timer_label = "Time Remaining"
+
+                hours, minutes = time_diff // 3600, (time_diff % 3600) // 60
+                time_display = f"{hours}h {minutes}m"
                 
                 attacked, unattacked = [], []
                 
-                for m in active_our:
+                for i, m in enumerate(active_our, 1):
                     atks = m.attacks 
                     diff_str = ""
-                    current_rel_pos = our_pos_map[m.tag]
                     
                     if atks:
-                        th_diffs = []
-                        mirr_diffs = []
-                        for a in atks:
-                            # TH Differential
-                            target_th = opp_th_map.get(a.defender_tag, m.town_hall)
-                            th_diff = target_th - m.town_hall
-                            th_diffs.append(f"{th_diff:+}")
+                        th_diffs = [f"{(opp_th_map.get(a.defender_tag, m.town_hall) - m.town_hall):+}" for a in atks]
+                        # Corrected Mirror Logic: Current - Target
+                        # We use 'i' as current_rel_pos based on the sorted list
+                        mirr_diffs = [f"{(i - (next((index + 1 for index, opp_m in enumerate(sorted(opp.members, key=lambda x: x.map_position)[:war_data.team_size]) if opp_m.tag == a.defender_tag), i))):+}" for a in atks]
+                        diff_str = f" [TH:{', '.join(th_diffs)} M:{', '.join(mirr_diffs)}]"
 
-                            # Mirror Differential (Relative Position)
-                            # If our #15 hits their #15, it's +0
-                            target_rel_pos = opp_pos_map.get(a.defender_tag, current_rel_pos)
-                            mirr_diff = target_rel_pos - current_rel_pos
-                            mirr_diffs.append(f"{mirr_diff:+}")
-                        
-                        diff_str = f" TH:[{', '.join(th_diffs)}] Mirr:[{', '.join(mirr_diffs)}]"
+                    # Name Trimming
+                    display_name = m.name.strip()
+                    if len(display_name) > 10:
+                        display_name = f"{display_name[:8]}.."
 
                     entry = {
-                        "name": m.name,
+                        "rel_pos": i,
                         "th": m.town_hall,
+                        "name": display_name,
                         "stars": sum(a.stars for a in atks),
                         "pct": sum(a.destruction for a in atks),
                         "att": len(atks),
-                        "rel_pos": current_rel_pos, # This is the 1-15 number
                         "diff": diff_str
                     }
                     
@@ -163,38 +176,36 @@ class WarCommands(commands.Cog):
                     else:
                         unattacked.append(entry)
 
-                # Sort for the final display (1 through 15)
-                attacked.sort(key=lambda e: e["rel_pos"])
-                unattacked.sort(key=lambda e: e["rel_pos"])
-
                 lines = [
                     "```yaml",
-                    f"{source} War Stats — {our.name}",
-                    f"Total Attacks: {our.attacks_used} / {war_data.team_size * max_attacks}",
-                    f"Time Remaining: {time_left}",
+                    f"{source} War: {our.name} vs {opp.name}",
+                    f"State: {war_data.state.value.capitalize()}",
+                    f"{timer_label}: {time_display}",
                     ""
                 ]
 
-                if attacked:
-                    lines.append("✅ Attacked")
-                    for e in attacked:
-                        lines.append(f"{e['rel_pos']:}. TH{e['th']} {e['name'].strip()}: {e['stars']}⭐, {round(e['pct'], 1)}% ({e['att']}/{max_attacks}){e['diff']}")
-                
-                if unattacked:
-                    lines.append("\n❌ Not Attacked")
+                # If it's Preparation Day, just show one list of "Lineup"
+                if war_data.state.value == "preparation":
+                    lines.append("⚔️ Active Lineup")
                     for e in unattacked:
-                        lines.append(f"{e['rel_pos']:}. TH{e['th']} {e['name']}")
-                
+                        lines.append(f"{e['rel_pos']:2}. TH{e['th']:2} {e['name']}")
+                else:
+                    # Normal Battle Day view
+                    if attacked:
+                        lines.append("✅ Attacked")
+                        for e in attacked:
+                            lines.append(f"{e['rel_pos']:2}. TH{e['th']:2} {e['name']}: {e['stars']}⭐, {round(e['pct'], 1)}% ({e['att']}/{max_attacks}){e['diff']}")
+                    
+                    if unattacked:
+                        lines.append("\n❌ Pending Attacks")
+                        for e in unattacked:
+                            lines.append(f"{e['rel_pos']:2}. TH{e['th']:2} {e['name']}")
+
                 lines.append("```")
                 
-                # Character limit safety...
                 final_yaml = "\n".join(lines)
-                if len(final_yaml) > 2000:
-                    chunks = [final_yaml[i:i+1900] for i in range(0, len(final_yaml), 1900)]
-                    for chunk in chunks:
-                        await interaction.followup.send(chunk if chunk.endswith("```") else f"{chunk}```")
-                else:
-                    await interaction.followup.send(final_yaml)
+                # (Keep your character limit safety logic here)
+                await interaction.followup.send(final_yaml)
            
 
         except Exception as e:
@@ -333,15 +344,15 @@ class WarCommands(commands.Cog):
                 if is_cwl:
                     embed.add_field(name="Clan Stars", value=f":star: {entry.clan.stars}/{entry.clan.max_stars*7}", inline=True)
                     embed.add_field(name="Clan Attacks Used", value=f"`{entry.clan.attacks_used}/{total_possible*7}`", inline=True)
-                    embed.add_field(name="Clan Destruction", value=f":fire: {clan_destruction}%/700%", inline=True)
+                    embed.add_field(name="Clan Destruction", value=f":boom: {clan_destruction}%/700%", inline=True)
                 if not is_cwl:
                     embed.add_field(name="Clan Stars", value=f":star: {entry.clan.stars}/{(entry.clan.max_stars)}", inline=True)
                     embed.add_field(name="Clan Attacks Used", value=f"`{entry.clan.attacks_used}`/`{total_possible}`", inline=True)
-                    embed.add_field(name="Clan Destruction", value=f":fire: {clan_destruction}%/100%", inline=True)
+                    embed.add_field(name="Clan Destruction", value=f":boom: {clan_destruction}%/100%", inline=True)
                 if not is_cwl:
                     embed.add_field(name="Opponent Stars", value=f":star: {entry.opponent.stars}/{entry.opponent.max_stars}", inline=True)
                     embed.add_field(name="Opponent Attacks Used", value=f"`{entry.opponent.attacks_used}`/`{total_possible}`", inline=True)
-                    embed.add_field(name="Opponent Destruction", value=f":fire: {opp_destruction}%/100%", inline=True)
+                    embed.add_field(name="Opponent Destruction", value=f":boom: {opp_destruction}%/100%", inline=True)
 
                 # embed.add_field(name="Stars", value=f"{entry.clan.stars} - {opp_stars}", inline=True)
                 # embed.add_field(name="Destruction", value=f"{round(entry.clan.destruction, 1)}%", inline=True)
@@ -514,7 +525,7 @@ class WarPatrol(commands.Cog):
                     # 3. Check time remaining
                     seconds_left = war.end_time.seconds_until
                     is_final_call = 2280 <= seconds_left <= 3600  
-                    is_warning = 13200 <= seconds_left <= 14400
+                    is_warning = 13200 <= seconds_left <= 14400   
 
                     if not (is_final_call or is_warning):
                         continue
@@ -552,6 +563,10 @@ class WarPatrol(commands.Cog):
 
                     # ... (previous logic for fetching war and slackers) ...
 
+                    hours = seconds_left // 3600
+                    minutes = (seconds_left % 3600) // 60
+                    exact_time = f"{hours}h {minutes}m"
+
                     time_label = "FINAL HOUR" if is_final_call else "4 HOURS LEFT"
                     source_label = "CWL" if is_cwl else "Normal War"
                     
@@ -566,7 +581,7 @@ class WarPatrol(commands.Cog):
                     embed = discord.Embed(
                         title=f"⚔️ {time_label}: War Attack Reminder",
                         description=f"Clan: **{war.clan.name}** vs **{war.opponent.name}**\n"
-                                    f"Please use your remaining hits before the war ends!",
+                                    f"Please use your remaining attacks before the war ends!",
                         color=embed_color
                     )
 
@@ -575,10 +590,12 @@ class WarPatrol(commands.Cog):
                         f"**{war.clan.name}**: ⭐ {war.clan.stars} ({war.clan.destruction:.1f}%)\n"
                         f"**{war.opponent.name}**: ⭐ {war.opponent.stars} ({war.opponent.destruction:.1f}%)"
                     )
-                    embed.add_field(name="📊 Current Score", value=scoreboard, inline=False)
+                    embed.add_field(name="Score", value=scoreboard, inline=True)
+
+                    embed.add_field(name="⏳ Time Left", value=f"` {exact_time} `", inline=True)
 
                     # 3. Add the slackers below the score
-                    embed.add_field(name="Pending Attacks", value="\n".join(slacking_names))
+                    embed.add_field(name="Pending Attacks", value="\n".join(slacking_names), inline=False)
                     embed.set_footer(text=f"War Type: {source_label}")
                     
                     await channel.send(embed=embed)

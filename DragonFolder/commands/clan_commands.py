@@ -83,7 +83,7 @@ class ClanCommands(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Error: {e}")
 
-    @app_commands.command(name="lookupclans", description="Search for clans by name")
+    @app_commands.command(name="searchclan", description="Search for clans by name")
     async def lookup_clans(self, interaction: discord.Interaction, 
     clanname: str, 
     war_frequency: str = None, 
@@ -156,7 +156,8 @@ class ClanCommands(commands.Cog):
                 # Use m.role.name to match the internal strings above
                 sorted_members = sorted(members, key=lambda m: role_order.get(m.role.name, 5))
             elif rank == "tag":
-                sorted_members = sorted(members, key=lambda m: m.tag)
+                sorted_members = members
+                #sorted_members = sorted(members, key=lambda m: m.tag)
             else:
                 await interaction.followup.send("Invalid ranking criteria.")
                 return
@@ -185,7 +186,7 @@ class ClanCommands(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Error: {e}")
 
-    @app_commands.command(name="lookupmember", description="Get info for a specific clan member")
+    @app_commands.command(name="searchmember", description="Get info for a specific clan member")
     async def lookup_member(self, interaction: discord.Interaction, user: discord.Member = None, username: str = None):
         await interaction.response.defer()
         try:
@@ -194,7 +195,7 @@ class ClanCommands(commands.Cog):
             tag = fetch_clan_from_db(interaction.guild.id)
             clan_data = await get_clan_data(tag)
         except Exception as e:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 f"Error getting clan information: {e}",
                 ephemeral=True
         )
@@ -212,16 +213,18 @@ class ClanCommands(commands.Cog):
 
         elif user:
             try:
-                linked_tag = fetch_player_from_DB(cursor, guild_id, user, None)
-                linked_tag = linked_tag.strip().upper()
-                for member in clan_data.members:
-                    if member.tag.strip().upper() == linked_tag:
-                        target = member
-                        break
+                linked_tag = fetch_player_from_DB(guild_id, user, None)
+                target = next((m for m in clan_data.members if m.tag.upper() == linked_tag.upper()), None)
+
+                if not target:
+                    return await interaction.followup.send(f"Member with tag `{linked_tag}` is linked, but not currently in this clan.", ephemeral=True)    
+            except Exception as e:
+                print(f"DEBUG: Lookup error for user: {e}")
+                return await interaction.followup.send(f"❌ Error: `{e}`", ephemeral=True)
             except PlayerNotLinkedError as e:
-                return await interaction.response.send_message(str(e), ephemeral=True)
+                return await interaction.followup.send(str(e), ephemeral=True)
             except MissingPlayerTagError as e:
-                return await interaction.response.send_message(str(e), ephemeral=True)
+                return await interaction.followup.send(str(e), ephemeral=True)
 
         if target:
             # Mapping coc.Role object to display strings
@@ -252,9 +255,9 @@ class ClanCommands(commands.Cog):
             # donationsReceived is shortened to .received in coc.py
             embed.add_field(name="Donations", value=f"Given: {target.donations} | Received: {target.received}", inline=False)
 
-            return await interaction.response.send_message(embed=embed)
+            return await interaction.followup.send(embed=embed)
 
-        return await interaction.response.send_message(
+        return await interaction.followup.send(
             f'User "{username or user.display_name}" not found in the clan.',
             ephemeral=True
         )

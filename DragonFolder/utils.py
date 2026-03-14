@@ -39,7 +39,7 @@ def fetch_player_from_DB(guild_id: int, user=None, provided_tag: str = None) -> 
         row = cursor.fetchone()
         if row and row[0]:
             return row[0]
-        raise PlayerNotLinkedError(user.mention)
+        raise PlayerNotLinkedError(user.display_name)
     raise PlayerTagError("Please provide a player tag or mention a linked user.")
 
 # --- Formatting Helpers ---
@@ -227,7 +227,7 @@ def calculate_medals(entry):
         
         # Per-player estimate: (Total Pool / Clan Attacks) * 6
         estimate = (raw_pool / max(1, total_clan_attacks)) * 6
-        return f"Estimated: {round(estimate):,}"
+        return f"Estimated {round(estimate):,}"
     
     else:
         # Final medals for completed raids
