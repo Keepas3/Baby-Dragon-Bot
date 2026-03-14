@@ -1,9 +1,24 @@
+from datetime import datetime
 import discord
 from discord.ext import commands
-from discord import app_commands, Embed
+from discord import app_commands, Embed, ui, Interaction
 import random
 import time
 import coc
+import praw
+import os
+
+# 1. INITIALIZE REDDIT AT THE TOP (Global Scope)
+client_id = os.getenv('client_id')
+client_secret = os.getenv('client_secret')
+user_agent = os.getenv('user_agent')
+
+reddit = praw.Reddit(
+    client_id=client_id,
+    client_secret=client_secret, 
+    user_agent=user_agent,
+    check_for_async=False # Recommended for use within discord.py
+)
 
 # Import helpers from config and utils
 from config import get_db_cursor, coc_client
@@ -13,9 +28,203 @@ from utils import (
     ClanNotSetError, PlayerNotLinkedError, MissingPlayerTagError
 )
 
+
+# 1. Define the Button View (Keep this outside the class)
+class HelpView(ui.View):
+    def __init__(self, summary_embed, full_embed):
+        super().__init__(timeout=120)
+        self.summary_embed = summary_embed
+        self.full_embed = full_embed
+        self.showing_all = False
+
+    @ui.button(label="Show All Commands", style=discord.ButtonStyle.blurple)
+    async def toggle_help(self, interaction: discord.Interaction, button: ui.Button):
+        if not self.showing_all:
+            button.label = "Show Less"
+            button.style = discord.ButtonStyle.gray # Change color for "Show Less"
+            self.showing_all = True
+            await interaction.response.edit_message(embed=self.full_embed, view=self)
+            
+        else:
+            button.label = "Show All Commands"
+            button.style = discord.ButtonStyle.blurple
+            self.showing_all = False
+            await interaction.response.edit_message(embed=self.summary_embed, view=self)
+           
+
 class BotCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    @app_commands.command(name="help", description="Displays command guide")
+    async def help_command(self, interaction: discord.Interaction):
+        """Sends a toggleable command menu."""
+        
+        # VERSION A: Summary (Only the most important ones)
+        summary_embed = discord.Embed(
+            title="🐉 Dragon Bot | Quick Guide",
+            description="Essential commands for daily usage. Click the button for the full list!",
+            color=0x00FF00
+        )
+        summary_embed.add_field(name="🛡️ Clan Core", 
+            value=(
+                "> `/claninfo` — General clan overview\n"
+                "> `/clanmembers` — Members ranked by leagues\n"
+                "> `/currentwar` — Stats & Info for War/CWL\n"
+                "> `/capitalraid` — Current Raid Weekend progress\n"
+                "> `/cwlprep` — Scout matchup levels for current CWL\n"
+
+        ), inline=True
+        )
+
+        summary_embed.add_field(name="⚔️ Player Core",
+           value=(
+                "> `/playerinfo` — General stats and clan-related info\n"
+                "> `/playerequipments` — Hero Equipment progress\n"
+                "> `/searchmember` — Find a player in your current clan"
+            ),
+            inline=False)
+        summary_embed.add_field(name="⚙️ Settings",
+            value=(
+                "> `/setclantag` — Link clan and set reminder channels\n"
+                "> `/botstatus` — View current server config\n"
+                "> `/link` / `/unlink` — Connect/disconnect CoC tag to Discord"
+            ),
+            inline=False
+        )
+
+        # VERSION B: Full (The master list)
+            # 🛡️ Clan Management
+        full_embed = discord.Embed(
+            title="🐉 Dragon Bot | Master Command List",
+            description="Complete list of all available tools and utilities.",
+            color=0x00FF00
+        )
+        full_embed.add_field(
+            name="🛡️ **Clan Management**",
+            value=(
+                "> `/claninfo` — General clan overview\n"
+                "> `/clanmembers` — Members ranked by leagues\n"
+                "> `/clansearch` — Search for a clan by name\n"
+                "> `/capitalraid` — Current Raid Weekend progress\n"
+                "> `/previousraids` — History of past Raid seasons\n"
+                "> `/currentwar` — Stats & Info for War/CWL\n"
+                "> `/warlog` — Check recent war history\n"
+                "> `/cwlprep` — Scout matchup levels for current CWL\n"
+                "> `/cwlschedule` — View CWL rounds and opponents\n"
+                "> `/cwlclansearch` — Search opponent rosters and levels"
+            ),
+            inline=False
+        )
+
+        # ⚔️ Player Tools
+        full_embed.add_field(
+            name="⚔️ **Player Tools**",
+            value=(
+                "> `/playerinfo` — General stats and clan-related info\n"
+                "> `/playertroops` — Troop & Siege levels\n"
+                "> `/playerequipments` — Hero Equipment progress\n"
+                "> `/playerspells` — Spell levels\n"
+                "> `/searchmember` — Find a player in your current clan"
+            ),
+            inline=False
+        )
+
+        # ⚙️ Settings & Admin
+        full_embed.add_field(
+            name="⚙️ **Settings & Admin**",
+            value=(
+                "> `/setclantag` — Link clan and set reminder channels\n"
+                "> `/disable_reminders` — Mute War or Raid pings (Admins)\n"
+                "> `/botstatus` — View current server config\n"
+                "> `/link` / `/unlink` — Connect/disconnect CoC tag to Discord"
+            ),
+            inline=False
+        )
+        full_embed.add_field(
+            name="**Extras**",
+            value=(
+                "> `/flipcoin`\n"
+                "> `/announce` — Make an announcement with the Dragon Bot\n"
+                "> `/receiveposts` — Receive posts from Reddit; default subreddit is ClashOfClansLeaks\n"
+                "> `/help` — This command"
+            ),
+            inline=False
+        )
+
+        full_embed.set_footer(text="Tip: Start with /setclantag and use /botstatus to setup your server!")
+
+        view = HelpView(summary_embed, full_embed)
+        await interaction.response.send_message(embed=summary_embed, view=view, ephemeral=True)
+
+    # ... (rest of your commands like receive_posts, flipcoin, etc., stay below here) ...
+    @app_commands.command(name="receiveposts", description="Receive posts from Reddit")
+    @app_commands.describe(
+        subreddit_name="The subreddit to check (Default: ClashOfClansLeaks)", 
+        post_type="Choose: hot, new, or top", 
+        limit="Number of posts (Max: 5)"
+    )
+    @app_commands.choices(post_type=[
+        app_commands.Choice(name="Hot", value="hot"),
+        app_commands.Choice(name="New", value="new"),
+        app_commands.Choice(name="Top", value="top")
+    ])
+    # Set the default here in the argument list
+    async def receive_posts(self, interaction: discord.Interaction, subreddit_name: str = "ClashOfClansLeaks", post_type: str = 'hot', limit: int = 3):
+        await interaction.response.defer()
+        
+        try:
+            subreddit = reddit.subreddit(subreddit_name) 
+            
+            # This triggers a check to see if the subreddit exists/is accessible
+            try:
+                subreddit.id 
+            except Exception:
+                return await interaction.followup.send(f"❌ Subreddit `r/{subreddit_name}` is private or does not exist.")
+
+            limit = min(limit, 5) 
+
+            # Fetching data
+            if post_type == 'new':
+                posts = subreddit.new(limit=12)
+            elif post_type == 'top':
+                posts = subreddit.top(limit=12)
+            else:
+                posts = subreddit.hot(limit=12)
+
+            # Filter pinned and NSFW (optional but recommended for clan safety)
+            non_pinned_posts = [post for post in posts if not post.stickied and not post.over_18][:limit]
+
+            if not non_pinned_posts:
+                return await interaction.followup.send(f"No suitable posts found in r/{subreddit_name}.")
+
+            await interaction.followup.send(f"**{post_type.capitalize()} posts from r/{subreddit_name}:**")
+
+            for post in non_pinned_posts: 
+                # Convert Reddit Unix timestamp to a Discord-friendly integer
+                post_time = int(post.created_utc)
+                
+                embed = discord.Embed(
+                    title=post.title[:250],
+                    url=f"https://reddit.com{post.permalink}", 
+                    # Adding the relative timestamp to the description
+                    description=f"Posted: <t:{post_time}:R>",
+                    color=0xFF4500,
+                    # This puts the exact date/time in the footer area
+                    timestamp=datetime.fromtimestamp(post.created_utc)
+                )
+                
+                # Image Logic
+                if any(post.url.endswith(ext) for ext in ['.jpg', '.png', '.gif', '.jpeg']):
+                    embed.set_image(url=post.url)
+                elif post.thumbnail and post.thumbnail.startswith("http"):
+                    embed.set_thumbnail(url=post.thumbnail)
+                
+                embed.set_footer(text=f"r/{subreddit_name} • 👍 {post.score} | 💬 {post.num_comments}")
+                await interaction.followup.send(embed=embed)
+
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ An unexpected error occurred: `{e}`")
 
     @app_commands.command(name="announce", description="Make an announcement")
     async def announce(self, interaction: discord.Interaction, message: str):
@@ -26,63 +235,62 @@ class BotCommands(commands.Cog):
         result = "Heads!!!" if random.randint(1, 2) == 1 else "Tails!!!"
         await interaction.response.send_message(f"The coin flips to... {result}")
 
-    @app_commands.command(name="help", description="Displays all available Baby Dragon Bot commands")
-    async def help_command(self, interaction: discord.Interaction):
-        """Sends an organized embed of all bot capabilities."""
-        embed = discord.Embed(
-            title="Baby Dragon Bot: Command Guide",
-            description="Use the commands below to manage your clan and track progress!",
-            color=0x00FF00,
-            timestamp=interaction.created_at
-        )
+    # @app_commands.command(name="help", description="Displays all available Baby Dragon Bot commands")
+    # async def help_command(self, interaction: discord.Interaction):
+    #     """Sends a high-end, organized command menu."""
+    #     embed = discord.Embed(
+    #         title="🐉 Dragon Bot | Command Guide",
+    #         description="Use the categories below to manage your clan and track progress!",
+    #         color=0x00FF00
+    #     )
 
-        # 🛡️ Clans Category
-        embed.add_field(
-            name="🛡️ Clan Management",
-            value=(
-                "`/claninfo` - General clan overview\n"
-                "`/clanmembers` - Members ranked by leagues\n"
-                "`/clansearch` - Search for a clan by name\n"
-                "`/capitalraid` - Current Raid Weekend progress\n"
-                "`/previousraids` - History of past Raid seasons\n"
-                "`/currentwar` - Stats & Info for War/CWL\n"
-                "`/warlog` - Check recent war history\n"
-                "`/cwlprep` - Scouts out CWL opponent levels\n"
-                "`/cwlschedule` - View CWL rounds and opponents"
-                "`/cwlclansearch` - Scouts out CWL opponent levels\n"
-            ),
-            inline=False
-        )
+    #     # 🛡️ Clan Management
+    #     embed.add_field(
+    #         name="🛡️ **Clan Management**",
+    #         value=(
+    #             "> `/claninfo` — General clan overview\n"
+    #             "> `/clanmembers` — Members ranked by leagues\n"
+    #             "> `/clansearch` — Search for a clan by name\n"
+    #             "> `/capitalraid` — Current Raid Weekend progress\n"
+    #             "> `/previousraids` — History of past Raid seasons\n"
+    #             "> `/currentwar` — Stats & Info for War/CWL\n"
+    #             "> `/warlog` — Check recent war history\n"
+    #             "> `/cwlprep` — Scout matchup levels for current round\n"
+    #             "> `/cwlschedule` — View CWL rounds and opponents\n"
+    #             "> `/cwlclansearch` — Search opponent rosters and levels"
+    #         ),
+    #         inline=False
+    #     )
 
-        # ⚔️ Players Category
-        embed.add_field(
-            name="⚔️ Player Tools",
-            value=(
-                "`/playerinfo` - General stats and hero levels\n"
-                "`/playertroops` - Troop & Siege levels\n"
-                "`/playerequipments` - Hero Equipment progress\n"
-                "`/playerspells` - Spell levels"
-                "`/searchmember` - Search for a player's information from current clan\n"
-            ),
-            inline=False
-        )
+    #     # ⚔️ Player Tools
+    #     embed.add_field(
+    #         name="⚔️ **Player Tools**",
+    #         value=(
+    #             "> `/playerinfo` — General stats and hero levels\n"
+    #             "> `/playertroops` — Troop & Siege levels\n"
+    #             "> `/playerequipments` — Hero Equipment progress\n"
+    #             "> `/playerspells` — Spell levels\n"
+    #             "> `/searchmember` — Find a player in your current clan"
+    #         ),
+    #         inline=False
+    #     )
 
-        # ⚙️ Configuration & Admin
-        embed.add_field(
-            name="⚙️ Settings & Admin",
-            value=(
-                "`/setclantag` - Link clan to server & set reminder channels\n"
-                "`/disable_reminders` - Mute War or Raid pings; only for admins\n"
-                "`/botstatus` - View current server config\n"
-                "`/link` / `/unlink` - Connect your CoC tag to Discord Server\n"
-            ),
-            inline=False
-        )
+    #     # ⚙️ Settings & Admin
+    #     embed.add_field(
+    #         name="⚙️ **Settings & Admin**",
+    #         value=(
+    #             "> `/setclantag` — Link clan and set reminder channels\n"
+    #             "> `/disable_reminders` — Mute War or Raid pings (Admins)\n"
+    #             "> `/botstatus` — View current server config\n"
+    #             "> `/link` / `/unlink` — Connect CoC tag to Discord"
+    #         ),
+    #         inline=False
+    #     )
 
-        embed.set_footer(text="Tip: To get your bot configured, start with /setclantag and then /botstatus to see your setup!")
+    #     embed.set_footer(text="Tip: Start with /setclantag and use /botstatus to setup your server!")
         
-        # Using simple response since we don't need to defer for a static embed
-        await interaction.response.send_message(embed=embed)
+    #     # Explicitly ensure no timestamp is sent
+    #     await interaction.response.send_message(embed=embed)
 
     
     @app_commands.command(name="botstatus", description="Get the server configuration and status")
@@ -246,5 +454,8 @@ class BotCommands(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Failed to update settings: {e}")
 
+    # Ensure you have 'import praw' at the top of your file!
+    # The reddit instance should be initialized in your __init__ or globally
+    
 async def setup(bot):
     await bot.add_cog(BotCommands(bot))
