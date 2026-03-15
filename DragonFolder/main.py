@@ -36,24 +36,20 @@ async def load_extensions():
 async def setup():
     """The main manager that runs before the bot starts."""
     async with bot:
-        # --- CRITICAL CHANGE 1: THE ORDER ---
         # 1. Start the Clash of Clans connection FIRST.
         # This populates config.coc_client so it's no longer None.
         await initialize_coc() 
         
         # Give it a small heartbeat to ensure the login is registered
         await asyncio.sleep(2)
-
-        # 2. NOW load the extensions. 
         # When 'setup(bot)' runs in your command files, config.coc_client will be ready.
         await load_extensions() 
         
-        # 3. Final step: Launch the bot
         await bot.start(TOKEN) 
 
-@tasks.loop(minutes=15)
+@tasks.loop(minutes=20)
 async def db_heartbeat():
-    """Keeps the Railway MySQL instance warm every 15 mins """
+    """Keeps the Railway MySQL instance warm every 20 mins """
     try:
         from config import get_db_cursor
         
@@ -69,14 +65,26 @@ async def db_heartbeat():
 @bot.event
 async def on_ready():
     """Triggered when the bot is officially connected to Discord."""
+    # 1. Start the DB Heartbeat
+    if not db_heartbeat.is_running():
+        db_heartbeat.start()
+        print("💓 Database heartbeat started.")
+
     try:
+        # OPTION A: Global Sync (Slow - up to 1 hour)
         await bot.tree.sync() 
+        
+        # OPTION B: Specific Guild Sync (Instant - Use for testing!)
+        # Replace 123456789 with your test server ID
+        # test_guild = discord.Object(id=123456789)
+        # bot.tree.copy_global_to(guild=test_guild)
+        # await bot.tree.sync(guild=test_guild)
+
         print(f'🚀 Logged in as {bot.user} and commands synced!')
     except Exception as e:
         print(f"Error syncing tree: {e}")
         
     await bot.change_presence(activity=discord.Game(name='Playing with Fire'))
-
 @bot.event
 async def on_guild_join(guild):
     print(f"Joined new guild: {guild.name} ({guild.id})")
@@ -102,7 +110,6 @@ async def on_guild_remove(guild):
         print(f"DB Error on guild remove: {e}")
 
 if __name__ == "__main__":
-    # --- CRITICAL CHANGE 2: WINDOWS FIX ---
     # Helps prevent loop errors on local Windows machines
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
