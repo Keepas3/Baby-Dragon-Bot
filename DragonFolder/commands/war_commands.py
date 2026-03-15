@@ -57,7 +57,7 @@ class WarCommands(commands.Cog):
         
             is_cwl = "League" in str(type(war_data))
             
-            source = "CWL" if is_cwl else "Normal War"
+            source = "CWL" if is_cwl else "Standard"
 
             # Ensure our clan is always 'our'
             if war_data.clan.tag == db_tag:
@@ -154,7 +154,7 @@ class WarCommands(commands.Cog):
                         # Corrected Mirror Logic: Current - Target
                         # We use 'i' as current_rel_pos based on the sorted list
                         mirr_diffs = [f"{(i - (next((index + 1 for index, opp_m in enumerate(sorted(opp.members, key=lambda x: x.map_position)[:war_data.team_size]) if opp_m.tag == a.defender_tag), i))):+}" for a in atks]
-                        diff_str = f" [TH:{', '.join(th_diffs)} M:{', '.join(mirr_diffs)}]"
+                        diff_str = f" [TH:{','.join(th_diffs)} M:{','.join(mirr_diffs)}]"
 
                     # Name Trimming
                     display_name = m.name.strip()
@@ -318,28 +318,31 @@ class WarCommands(commands.Cog):
                 clan_name = entry.clan.name
                 clan_tag = entry.clan.tag
                 clan_stars = entry.clan.stars
-                if entry.opponent:
+                if entry.opponent and entry.opponent.name:
                     opp_name = entry.opponent.name
-                    opp_tag = entry.opponent.tag if entry.opponent.tag else "cWL"
-                    
+                    opp_tag = entry.opponent.tag or "N/A"
+                    opp_stars = entry.opponent.stars
+                    opp_destruction = round(entry.opponent.destruction, 3)
                 else:
-                    opp_name = "CWL"
-                    opp_stars = "__"
-                    opp_tag = entry.opponent.tag if entry.opponent.tag else "cWL"
+                    # This handles the CWL summary cases where opponent is None
+                    opp_name = "CWL Group"
+                    opp_tag = "N/A"
+                    opp_stars = "N/A"
+                    opp_destruction = 0
                 
                 CWL_rounds = 7
-                clan_destruction = round(entry.clan.destruction, 2)
-                opp_destruction = round(entry.opponent.destruction, 2) if entry.opponent else 0
+                clan_destruction = round(entry.clan.destruction, 3)
+                opp_destruction = round(entry.opponent.destruction, 3) if entry.opponent else 0
 
                 res_raw = str(entry.result).lower() if entry.result else "league"
                 color = 0x00ff00 if "win" in res_raw else 0xff0000 if "lose" in res_raw else 0xffff00
 
                 embed = discord.Embed(
                     title=f"{clan_name} vs {opp_name}",
-                    description=f"Type: {'CWL' if opp_name == '' else 'Normal War'}\nClan Tag: `{clan_tag}` | Opp. Tag: `{opp_tag}`",
+                    description=f"Type: {'CWL' if opp_name == 'CWL Group' else 'Standard War'}\nClan Tag: `{clan_tag}` | Opp. Tag: `{opp_tag}`",
                     color=color
                 )
-                embed.add_field(name="Result", value=f"**{entry.result}**", inline=False)
+                embed.add_field(name="Result", value=f"**{entry.result or 'CWL'}**", inline=False)
 
                 if is_cwl:
                     embed.add_field(name="Clan Stars", value=f":star: {entry.clan.stars}/{entry.clan.max_stars*7}", inline=True)
@@ -484,6 +487,7 @@ class WarCommands(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Scouting Error: {e}")
 
+
 class WarPatrol(commands.Cog):
     def __init__(self, bot, coc_client):
         self.bot = bot
@@ -505,90 +509,83 @@ class WarPatrol(commands.Cog):
                     continue 
 
                 try:
-                    # 1. Fetch war data
-                    war = await self.coc_client.get_current_war(clan_tag)
+                    # --- TRANSPLANTED CURRENTWAR LOGIC ---
+                    war_data = await self.coc_client.get_current_war(clan_tag)
                     
-                    # 2. CWL Round Check
-                    if not war or war.state == "notInWar":
-                        group = await self.coc_client.get_league_group(clan_tag)
-                        if group and group.state != "ended":
-                            async for cwl_war in group.get_wars_for_clan(clan_tag):
-                                if cwl_war.state == "inWar":
-                                    war = cwl_war
-                                    # --- ADD THIS: FORCE THE CWL FLAG ---
-                                    setattr(war, 'is_league_entry', True)
-                                    break
-                    
-                    if not war or war.state != "inWar":
+                    # If no standard war, check for CWL
+                    if not war_data or war_data.state == "notInWar":
+                        try:
+                            group = await self.coc_client.get_league_group(clan_tag)
+                            if group:
+                                async for cwl_war in group.get_wars_for_clan(clan_tag):
+                                    if cwl_war.state != "notInWar":
+                                        war_data = cwl_war
+                                        break
+                        except coc.NotFound:
+                            war_data = None
+
+                    # 1. Immediate Exit if no war at all
+                    if not war_data or war_data.state != "inWar":
                         continue
 
-                    # 3. Check time remaining
-                    seconds_left = war.end_time.seconds_until
-                    is_final_call = 2280 <= seconds_left <= 3600  
-                    is_warning = 13200 <= seconds_left <= 14400   
+                    # 2. Dynamic Type Check
+                    is_cwl = "League" in str(type(war_data))
+                    max_atks = 1 if is_cwl else 2
+                    source_label = "CWL" if is_cwl else "Standard War"
+
+                    # 3. Time Check
+                    seconds_left = war_data.end_time.seconds_until
+                    is_final_call = 2280 <= seconds_left <= 3600
+                    is_warning = 13200 <= seconds_left <= 14400
 
                     if not (is_final_call or is_warning):
                         continue
 
-                    # 4. BULLETPROOF DETECTION
-                    # Combines all possible ways coc.py flags a CWL war
-                    is_cwl = any([
-                        getattr(war, 'is_league_entry', False),
-                        hasattr(war, 'war_tag'),
-                        "league" in str(type(war)).lower()
-                    ])
-                    
-                    max_atks = 1 if is_cwl else 2
+                    # 4. Slacker Identification
                     slacking_names = []
+                    # Map position logic
+                    our_members = sorted(war_data.clan.members, key=lambda x: x.map_position)
                     
-                    # 5. Identify Slackers
-                    our_sorted = sorted(war.clan.members, key=lambda x: x.map_position)
-                    active_lineup = our_sorted[:war.team_size]
-                    
-                    for i, m in enumerate(active_lineup, 1):
+                    for m in our_members:
                         if len(m.attacks) < max_atks:
                             needed = max_atks - len(m.attacks)
-                            slacking_names.append(f"{i}. TH{m.town_hall} **{m.name}** ({needed} left)")
+                            slacking_names.append(f"#{m.map_position} **{m.name}** ({needed} left)")
 
                     if not slacking_names:
                         continue 
 
-                    # 6. Post Reminder
+                    # 5. Send Notification
                     channel = self.bot.get_channel(int(war_channel_id))
                     if not channel:
-                        try:
-                            channel = await self.bot.fetch_channel(int(war_channel_id))
-                        except:
-                            continue
+                        channel = await self.bot.fetch_channel(int(war_channel_id))
 
-                    # ... (previous logic for fetching war and slackers) ...
-
+                    # (Add your Embed formatting logic here from previous steps)
                     hours = seconds_left // 3600
                     minutes = (seconds_left % 3600) // 60
                     exact_time = f"{hours}h {minutes}m"
 
                     time_label = "FINAL HOUR" if is_final_call else "4 HOURS LEFT"
-                    source_label = "CWL" if is_cwl else "Normal War"
+                    source_label = "CWL" if is_cwl else "Standard War"
                     
                     # 1. Determine the color based on who is winning
-                    if war.clan.stars > war.opponent.stars:
+                    if war_data.clan.stars > war_data.opponent.stars:
                         embed_color = 0x00ff00 # Green (Winning)
-                    elif war.clan.stars < war.opponent.stars:
+                    elif war_data.clan.stars < war_data.opponent.stars:
                         embed_color = 0xff0000 # Red (Losing)
                     else:
                         embed_color = 0xffff00 # Yellow (Tied)
 
                     embed = discord.Embed(
                         title=f"⚔️ {time_label}: War Attack Reminder",
-                        description=f"Clan: **{war.clan.name}** vs **{war.opponent.name}**\n"
+                        description=f"Clan: **{war_data.clan.name}** vs **{war_data.opponent.name}**\n"
                                     f"Please use your remaining attacks before the war ends!",
                         color=embed_color
                     )
 
                     # 2. Add the Scoreboard field at the top
                     scoreboard = (
-                        f"**{war.clan.name}**: ⭐ {war.clan.stars} ({war.clan.destruction:.1f}%)\n"
-                        f"**{war.opponent.name}**: ⭐ {war.opponent.stars} ({war.opponent.destruction:.1f}%)"
+                        f"**{war_data.clan.name}**: ⭐ {war_data.clan.stars} ({war_data.clan.destruction:.1f}%)\n"
+                        f"**{war_data.opponent.name}**: ⭐ {war_data.opponent.stars} ({war_data.opponent.destruction:.1f}%)"
                     )
                     embed.add_field(name="Score", value=scoreboard, inline=True)
 
@@ -597,7 +594,7 @@ class WarPatrol(commands.Cog):
                     # 3. Add the slackers below the score
                     embed.add_field(name="Pending Attacks", value="\n".join(slacking_names), inline=False)
                     embed.set_footer(text=f"War Type: {source_label}")
-                    
+
                     await channel.send(embed=embed)
 
                 except Exception as e:
@@ -609,6 +606,74 @@ class WarPatrol(commands.Cog):
     @war_reminder.before_loop
     async def before_war_reminder(self):
         await self.bot.wait_until_ready()
+
+#ONLY FOR DEBUGGING PURPOSES - SIMULATE THE LOGIC WITHOUT WAITING FOR THE TASK LOOP
+    # @app_commands.command(name="test_war_logic", description="DEBUG: Test war detection logic")
+    # @app_commands.checks.has_permissions(administrator=True)
+    # async def test_logic(self, interaction: discord.Interaction):
+    #     await interaction.response.defer(ephemeral=True)
+        
+    #     # 1. Get the tag from DB for the current server
+    #     tag = fetch_clan_from_db(interaction.guild.id)
+        
+    #     war = None
+    #     is_cwl = False
+
+    #     # --- COPY-PASTE YOUR NEW LOGIC HERE ---
+    #     # 1. Get CWL Data
+    #     try:
+    #         group = await self.coc_client.get_league_group(tag)
+    #         if group and group.state != "ended":
+    #             async for cwl_war in group.get_wars_for_clan(tag):
+    #                 if cwl_war.state == "inWar":
+    #                     war = cwl_war
+    #                     is_cwl = True
+    #                     break
+    #     except coc.NotFound:
+    #         group = None
+
+    #     # 2. ADD THIS: Standard War Fallback
+    #     if not war:
+    #         war = await self.coc_client.get_current_war(tag)
+    #         if war and war.state == "notInWar":
+    #             war = None # Ensure it stays None if not actually in a war
+    #         is_cwl = False # If it's from current_war, it's Standard
+
+    #     # 1. Type and Attack Rule
+    #     is_cwl = "League" in str(type(war))
+    #     max_atks = 1 if is_cwl else 2
+        
+    #     # 2. Time Window Logic (Matching your loop)
+    #     seconds_left = war.end_time.seconds_until
+    #     is_final_call = 2280 <= seconds_left <= 3600
+    #     is_warning = 13200 <= seconds_left <= 14400
+        
+    #     # 3. Slacker Count
+    #     slacking_count = 0
+    #     for m in war.clan.members:
+    #         if len(m.attacks) < max_atks:
+    #             slacking_count += 1
+
+    #     # 4. Final Verdict
+    #     will_send = (is_final_call or is_warning) and slacking_count > 0
+
+    #     debug_msg = (
+    #         f"🔍 **WarPatrol Logic Simulation**\n"
+    #         f"----------------------------------\n"
+    #         f"**Identify:**\n"
+    #         f"- Type: `{'CWL' if is_cwl else 'Standard War'}`\n"
+    #         f"- Max Attacks: `{max_atks}`\n\n"
+    #         f"**Timing:**\n"
+    #         f"- Seconds Left: `{seconds_left}`\n"
+    #         f"- In Final Hour Window? `{'✅' if is_final_call else '❌'}`\n"
+    #         f"- In 4-Hour Warning Window? `{'✅' if is_warning else '❌'}`\n\n"
+    #         f"**Slackers:**\n"
+    #         f"- Pending Attackers: `{slacking_count}`\n\n"
+    #         f"**VERDICT:**\n"
+    #         f"> Will reminder send now? **{'🚀 YES' if will_send else '💤 NO'}**"
+    #     )
+        
+    #     await interaction.followup.send(debug_msg)
 
 # --- CRITICAL SETUP UPDATE ---
 async def setup(bot):

@@ -8,7 +8,7 @@ import coc
 import praw
 import os
 
-# 1. INITIALIZE REDDIT AT THE TOP (Global Scope)
+# INITIALIZE REDDIT AT THE TOP (Global Scope)
 client_id = os.getenv('client_id')
 client_secret = os.getenv('client_secret')
 user_agent = os.getenv('user_agent')
