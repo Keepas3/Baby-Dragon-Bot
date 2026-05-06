@@ -17,7 +17,7 @@ reddit = praw.Reddit(
     client_id=client_id,
     client_secret=client_secret, 
     user_agent=user_agent,
-    check_for_async=False # Recommended for use within discord.py
+    check_for_async=False 
 )
 
 # Import helpers from config and utils
