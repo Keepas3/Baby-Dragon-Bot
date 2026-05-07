@@ -229,59 +229,39 @@ class BotCommands(commands.Cog):
     async def help_command(self, interaction: discord.Interaction):
         """Sends a toggleable command menu."""
         
-        # VERSION A: Summary (Only the most important ones)
         summary_embed = discord.Embed(
             title="🐉 Dragon Bot | Quick Guide",
-            description="Essential commands for daily usage. Click the button for the full list!",
+            description="Commands Listed **[G]** Global | **[C]** Clan/Server Only.  Click the button for the full list!",
             color=0x00FF00
         )
         summary_embed.add_field(name="🛡️ Clan Core", 
             value=(
-                "> `/claninfo` — General clan overview\n"
-                "> `/clanmembers` — Members ranked by leagues\n"
-                "> `/currentwar` — Stats & Info for War/CWL\n"
-                "> `/capitalraid` — Current Raid Weekend progress\n"
-                "> `/cwlprep` — Scout matchup levels for current CWL\n"
-
-        ), inline=True
+                value="`[C]` `/claninfo` | `/currentwar` | `/capitalraid` | `/clanmembers`", inline=False
         )
 
         summary_embed.add_field(name="⚔️ Player Core",
            value=(
-                "> `/playerinfo` — General stats and clan-related info\n"
-                "> `/playerheroes` — Check heroes, pets and equipment levels\n"
-                "> `/searchmember` — Find a player in your current clan"
-            ),
-            inline=False)
+                value="`[G]` `/playerinfo` | `/playerheroes` | `/playerlevels`", inline=False
+        )
         summary_embed.add_field(name="⚙️ Settings",
             value=(
-                "> `/setclantag` — Link clan and set reminder channels\n"
-                "> `/botstatus` — View current server config\n"
-                "> `/link` / `/unlink` — Connect/disconnect CoC tag to Discord"
+                "> `[C]` `/setclantag` · `/disable_reminders` · `/botstatus` \n"
+                "> `[G]` `/link` · `/unlink` (Connect CoC or Store account)"
             ),
             inline=False
         )
 
-        # VERSION B: Full (The master list)
-            # 🛡️ Clan Management
         full_embed = discord.Embed(
             title="🐉 Dragon Bot | Master Command List",
-            description="Complete list of all available tools and utilities.",
+            description="Complete list of all available commands. **[G]** Global | **[C]** Only works in clan/server.",
             color=0x00FF00
         )
         full_embed.add_field(
             name="🛡️ **Clan Management**",
             value=(
-                "> `/claninfo` — General clan overview\n"
-                "> `/clanmembers` — Members ranked by leagues\n"
-                "> `/clansearch` — Search for a clan by name\n"
-                "> `/capitalraid` — Current Raid Weekend progress\n"
-                "> `/previousraids` — History of past Raid seasons\n"
-                "> `/currentwar` — Stats & Info for War/CWL\n"
-                "> `/warlog` — Check recent war history\n"
-                "> `/cwlprep` — Scout matchup levels for current CWL\n"
-                "> `/cwlschedule` — View CWL rounds and opponents\n"
-                "> `/cwlclansearch` — Search opponent rosters and levels"
+               "> `[C]` `/claninfo` · `/clanmembers` · `/capitalraid` · `/previousraids` \n"
+                "> `[C]` `/currentwar` · `/warlog` · `/cwlprep` · `/cwlclansearch` · `/cwlschedule` \n"
+                "> `[G]` `/clansearch`"
             ),
             inline=False
         )
@@ -290,10 +270,8 @@ class BotCommands(commands.Cog):
         full_embed.add_field(
             name="⚔️ **Player Tools**",
             value=(
-                "> `/playerinfo` — General stats and clan-related info\n"
-                "> `/playerlevels` — Troops & Siege levels\n"
-                "> `/playerheroes` — Check heroes, pets and equipment levels\n"
-                "> `/searchmember` — Find a player in your current clan"
+                "> `[G]` `/playerinfo` · `/playerlevels` · `/playerheroes` \n"
+                "> `[C]` `/searchmember` (Find player in clan)"
             ),
             inline=False
         )
@@ -302,25 +280,20 @@ class BotCommands(commands.Cog):
         full_embed.add_field(
             name="⚙️ **Settings & Admin**",
             value=(
-                "> `/setclantag` — Link clan and set reminder channels\n"
-                "> `/disable_reminders` — Mute War or Raid pings (Admins)\n"
-                "> `/botstatus` — View current server config\n"
-                "> `/link` / `/unlink` — Connect/disconnect CoC tag to Discord"
+                "> `[C]` `/setclantag` · `/disable_reminders` · `/botstatus` \n"
+                "> `[G]` `/link` · `/unlink` (Connect CoC or Store account)"
             ),
             inline=False
         )
         full_embed.add_field(
             name="**Extras**",
             value=(
-                "> `/flipcoin`\n"
-                "> `/announce` — Make an announcement with the Dragon Bot\n"
-                "> `/receiveposts` — Receive posts from Reddit; default subreddit is ClashOfClansLeaks\n"
-                "> `/help` — This command"
+                "`[G]` `/flipcoin` · `/help` \n`· `/receiveposts`(Reddit) · `/about`"
             ),
             inline=False
         )
 
-        full_embed.set_footer(text="Tip: Start with /setclantag and use /botstatus to setup your server!")
+        full_embed.set_footer(text="Tip: Start with /setclantag to setup your server. /link to link your game account to profile.")
 
         view = HelpView(summary_embed, full_embed)
         await interaction.response.send_message(embed=summary_embed, view=view, ephemeral=True)
@@ -393,10 +366,6 @@ class BotCommands(commands.Cog):
 
         except Exception as e:
             await interaction.followup.send(f"⚠️ An unexpected error occurred: `{e}`")
-
-    @app_commands.command(name="announce", description="Make an announcement")
-    async def announce(self, interaction: discord.Interaction, message: str):
-        await interaction.response.send_message(message)
 
     @app_commands.command(name="flipcoin", description="Flip coin (heads or tails)")
     async def flip(self, interaction: discord.Interaction):
