@@ -229,21 +229,27 @@ class BotCommands(commands.Cog):
     async def help_command(self, interaction: discord.Interaction):
         """Sends a toggleable command menu."""
         
+      
         summary_embed = discord.Embed(
             title="🐉 Dragon Bot | Quick Guide",
-            description="Commands Listed **[G]** Global | **[C]** Clan/Server Only.  Click the button for the full list!",
+            description="**[G]** Global | **[C]** Clan/Server Only\nClick the button for the full list!",
             color=0x00FF00
         )
-        summary_embed.add_field(name="🛡️ Clan Core", 
-            value=(
-                value="`[C]` `/claninfo` | `/currentwar` | `/capitalraid` | `/clanmembers`", inline=False
+        
+        summary_embed.add_field(
+            name="🛡️ Clan Core", 
+            value="`[C]` `/claninfo` | `/currentwar` | `/capitalraid` | `/clanmembers`", 
+            inline=False
         )
 
-        summary_embed.add_field(name="⚔️ Player Core",
-           value=(
-                value="`[G]` `/playerinfo` | `/playerheroes` | `/playerlevels`", inline=False
+        summary_embed.add_field(
+            name="⚔️ Player Core",
+            value="`[G]` `/playerinfo` | `/playerheroes` | `/playerlevels`", 
+            inline=False
         )
-        summary_embed.add_field(name="⚙️ Settings",
+        
+        summary_embed.add_field(
+            name="⚙️ Settings",
             value=(
                 "> `[C]` `/setclantag` · `/disable_reminders` · `/botstatus` \n"
                 "> `[G]` `/link` · `/unlink` (Connect CoC or Store account)"
@@ -251,24 +257,25 @@ class BotCommands(commands.Cog):
             inline=False
         )
 
+       
         full_embed = discord.Embed(
             title="🐉 Dragon Bot | Master Command List",
-            description="Complete list of all available commands. **[G]** Global | **[C]** Only works in clan/server.",
+            description="Complete list of all available commands.\n**[G]** Global | **[C]** Clan/Server Only",
             color=0x00FF00
         )
+
         full_embed.add_field(
-            name="🛡️ **Clan Management**",
+            name="🛡️ Clan Management",
             value=(
-               "> `[C]` `/claninfo` · `/clanmembers` · `/capitalraid` · `/previousraids` \n"
+                "> `[C]` `/claninfo` · `/clanmembers` · `/capitalraid` · `/previousraids` \n"
                 "> `[C]` `/currentwar` · `/warlog` · `/cwlprep` · `/cwlclansearch` · `/cwlschedule` \n"
                 "> `[G]` `/clansearch`"
             ),
             inline=False
         )
 
-        # ⚔️ Player Tools
         full_embed.add_field(
-            name="⚔️ **Player Tools**",
+            name="⚔️ Player Tools",
             value=(
                 "> `[G]` `/playerinfo` · `/playerlevels` · `/playerheroes` \n"
                 "> `[C]` `/searchmember` (Find player in clan)"
@@ -276,27 +283,29 @@ class BotCommands(commands.Cog):
             inline=False
         )
 
-        # ⚙️ Settings & Admin
         full_embed.add_field(
-            name="⚙️ **Settings & Admin**",
+            name="⚙️ Settings & Admin",
             value=(
                 "> `[C]` `/setclantag` · `/disable_reminders` · `/botstatus` \n"
                 "> `[G]` `/link` · `/unlink` (Connect CoC or Store account)"
             ),
             inline=False
         )
+
         full_embed.add_field(
             name="**Extras**",
             value=(
-                "`[G]` `/flipcoin` · `/help` \n`· `/receiveposts`(Reddit) · `/about`"
+                "> `[G]` `/flipcoin` · `/help` · `/about` · `/receiveposts` (Reddit Leaks) \n"
+                
             ),
             inline=False
         )
 
-        full_embed.set_footer(text="Tip: Start with /setclantag to setup your server. /link to link your game account to profile.")
+        full_embed.set_footer(text="Tip: Use /setclantag to setup your server | /link to connect your account.")
 
+        # Re-using your HelpView logic to toggle between them
         view = HelpView(summary_embed, full_embed)
-        await interaction.response.send_message(embed=summary_embed, view=view, ephemeral=True)
+        await interaction.response.send_message(embed=summary_embed, view=view)
 
     # ... (rest of your commands like receive_posts, flipcoin, etc., stay below here) ...
     @app_commands.command(name="receiveposts", description="Receive posts from Reddit")
