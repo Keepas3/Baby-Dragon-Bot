@@ -7,6 +7,9 @@ import time
 import coc
 import praw
 import os
+import json
+import asyncio
+from services.coc_worker import run_mission_worker
 
 # INITIALIZE REDDIT AT THE TOP (Global Scope)
 client_id = os.getenv('client_id')
@@ -29,7 +32,6 @@ from utils import (
 )
 
 
-# 1. Define the Button View (Keep this outside the class)
 class HelpView(ui.View):
     def __init__(self, summary_embed, full_embed):
         super().__init__(timeout=120)
@@ -50,7 +52,174 @@ class HelpView(ui.View):
             button.style = discord.ButtonStyle.blurple
             self.showing_all = False
             await interaction.response.edit_message(embed=self.summary_embed, view=self)
-           
+# --- 🏰 UPDATED GLOBAL VERIFIED MODAL ---
+class CoCLinkModal(discord.ui.Modal, title="Link Clash of Clans Account"):
+    player_tag = discord.ui.TextInput(
+        label="Player Tag",
+        placeholder="#2PP92G2Y",
+        required=True,
+        max_length=15
+    )
+    
+    api_token = discord.ui.TextInput(
+        label="API Token / Verification Token",
+        placeholder="Enter your 8-digit in-game API Token",
+        required=True,
+        min_length=8,
+        max_length=8
+    )
+
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        clean_tag = self.player_tag.value.strip().upper()
+        if not clean_tag.startswith("#"): 
+            clean_tag = f"#{clean_tag}"
+            
+        token = self.api_token.value.strip()
+
+        # Check tag validity
+        if await check_coc_player_tag(clean_tag):
+            try:
+                # 1. Verify token with Supercell
+                is_verified = await coc_client.verify_player_token(clean_tag, token)
+                
+                if not is_verified:
+                    await interaction.followup.send(
+                        "❌ **Verification Failed!** The API Token you entered does not match this player tag.\n\n"
+                        "**How to find your token:**\n"
+                        "1. Open Clash of Clans -> Settings -> More Settings.\n"
+                        "2. Scroll to the bottom and click 'API Token'.\n"
+                        "3. Re-run `/link` and enter your fresh token.",
+                        ephemeral=True
+                    )
+                    return
+
+                # 2. Save globally (No guild_id or guild_name needed!)
+                conn = get_db_connection() 
+                cursor = conn.cursor(buffered=True) 
+                
+                cursor.execute("""
+                    INSERT INTO players (discord_id, discord_username, player_tag, is_premium)
+                    VALUES (%s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE 
+                        player_tag = VALUES(player_tag),
+                        discord_username = VALUES(discord_username)
+                """, (
+                    str(interaction.user.id), 
+                    interaction.user.display_name, 
+                    clean_tag, 
+                    0
+                ))
+                conn.commit() 
+                cursor.close()
+                conn.close()
+                
+                await interaction.followup.send(f"✅ **Account Verified!** You have successfully linked **{clean_tag}** globally to your Discord profile!")
+                
+            except Exception as e:
+                print(f"💥 DB/API Error during Link: {e}")
+                await interaction.followup.send("❌ A system error occurred while saving your profile.", ephemeral=True)
+        else:
+            await interaction.followup.send("❌ Invalid player tag format.", ephemeral=True)
+
+
+# --- 🛒 UPDATED GLOBAL LINK MENU VIEW ---
+class LinkMenuView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=180)
+        self.cog = cog
+
+    # --- 🛒 UPDATED GLOBAL LINK MENU VIEW (With Step-by-Step Embeds) ---
+class LinkMenuView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=180)
+        self.cog = cog
+
+    @discord.ui.button(label="Link CoC Account", style=discord.ButtonStyle.primary, emoji="🏰")
+    async def link_coc(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Clean & Simple: Opens the modal globally.
+        await interaction.response.send_modal(CoCLinkModal(self.cog))
+
+    @discord.ui.button(label="Link Store (Cookies)", style=discord.ButtonStyle.success, emoji="🛒")
+    async def link_store(self, interaction: discord.Interaction, button: discord.ui.Button):
+        is_dm = interaction.guild is None
+
+        # 1. Create a beautiful, step-by-step registration instructions embed
+        guide_embed = discord.Embed(
+            title="🛒 Supercell Store Cookie Link Guide",
+            description=(
+                "Follow these simple steps on your computer to securely register your web store session. "
+                "This allows the bot to automatically claim your weekly rewards!\n\n"
+                "**⏳ I am waiting for your file (expires in 2 minutes)...**"
+            ),
+            color=discord.Color.green()
+        )
+        
+        guide_embed.add_field(
+            name="Step 1: Install a Cookie Exporter",
+            value="Install a [Copy Cookies](https://chromewebstore.google.com/detail/copy-cookies/jcbpglbplpblnagieibnemmkiamekcdg) browser extension",
+            inline=False
+        )
+        guide_embed.add_field(
+            name="Step 2: Log Into Supercell Store",
+            value="Go to the official [Clash of Clans Store](https://store.supercell.com/clashofclans) and sign in.",
+            inline=False
+        )
+        guide_embed.add_field(
+            name="3️Step 3: Export Your Cookies",
+            value="Click on browser extension to copy the cookies",
+            inline=False
+        )
+        guide_embed.add_field(
+            name="Step 4: Upload it Here",
+            value="Paste and send in Dragon Bot DM.",
+            inline=False
+        )
+
+        if is_dm:
+            # If already in DMs, send the guide directly
+            await interaction.response.send_message(embed=guide_embed, ephemeral=True)
+            asyncio.create_task(self.cog.handle_cookie_upload(interaction, interaction.user.id))
+        else:
+            try:
+                # Attempt to DM the user the guide
+                dm_channel = await interaction.user.create_dm()
+                await dm_channel.send(embed=guide_embed)
+                
+                # Send an ephemeral confirmation embed inside the server channel
+                status_embed = discord.Embed(
+                    title="🔒 Security Check Sent!",
+                    description=(
+                        "To protect your web cookies, I have sent you a private direct message with step-by-step instructions.\n\n"
+                        "**Please check your DMs to complete the registration!**"
+                    ),
+                    color=discord.Color.blue()
+                )
+                status_embed.set_footer(text="Ensure your server DM privacy settings are enabled!")
+                
+                await interaction.response.send_message(embed=status_embed, ephemeral=True)
+                asyncio.create_task(self.cog.handle_cookie_upload(interaction, interaction.user.id, dm_channel))
+                
+            except discord.Forbidden:
+                # If the user has DMs closed, show an instructional error embed
+                fail_embed = discord.Embed(
+                    title="❌ DM Delivery Failed",
+                    description=(
+                        "I was unable to send you a Direct Message.\n\n"
+                        "**How to fix this:**\n"
+                        "1. Go to your **Discord User Settings**.\n"
+                        "2. Select **Privacy & Safety**.\n"
+                        "3. Turn ON **'Allow direct messages from server members'**.\n"
+                        "4. Click the **Link Store** button again!"
+                    ),
+                    color=discord.Color.red()
+                )
+                await interaction.response.send_message(embed=fail_embed, ephemeral=True)
 
 class BotCommands(commands.Cog):
     def __init__(self, bot):
@@ -267,12 +436,14 @@ class BotCommands(commands.Cog):
             cursor = conn.cursor(buffered=True)
             guild_id = str(interaction.guild.id)
             
+            # 1. Fetch server configuration (clan tag, reminder channels)
             cursor.execute("SELECT clan_tag, war_channel_id, raid_channel_id FROM servers WHERE guild_id = %s", (guild_id,))
             row = cursor.fetchone()
             
-            # 1. Improved Safely check if row exists
             if row:
-                clan_tag = f"`{row[0]}`" if row[0] else "`❌ Not Set`"
+                # Keep the formatting clean, but show raw text if empty
+                raw_clan_tag = row[0]
+                clan_tag = f"`{raw_clan_tag}`" if raw_clan_tag else "`❌ Not Set`"
                 war_mention = f"<#{row[1]}>" if row[1] else "`❌ Not Configured`"
                 raid_mention = f"<#{row[2]}>" if row[2] else "`❌ Not Configured`"
             else:
@@ -280,9 +451,19 @@ class BotCommands(commands.Cog):
                 war_mention = "`❌ Not Configured`"
                 raid_mention = "`❌ Not Configured`"
 
-            # 2. Fetch Linked Players
-            cursor.execute("SELECT discord_username, player_tag FROM players WHERE guild_id = %s", (guild_id,))
-            players = cursor.fetchall()
+            # 2. Fetch Linked Players globally, filtered to ONLY members of this server
+            # We fetch all member IDs currently in this server guild
+            member_ids = [str(member.id) for member in interaction.guild.members]
+            players = []
+
+            if member_ids:
+                # Reconstruct an SQL "IN" clause: WHERE discord_id IN (%s, %s, %s...)
+                placeholders = ','.join(['%s'] * len(member_ids))
+                query = f"SELECT discord_username, player_tag FROM players WHERE discord_id IN ({placeholders})"
+                
+                cursor.execute(query, tuple(member_ids))
+                players = cursor.fetchall()
+
             player_info = "\n".join([f"• @{u} (`{t}`)" for u, t in players]) if players else "` No Linked Members `"
 
             # 3. Build the Polished Embed
@@ -292,11 +473,10 @@ class BotCommands(commands.Cog):
                 timestamp=interaction.created_at
             )
             
-            embed.add_field(name="Current Clan", value=f"`{clan_tag}`", inline=False)
+            # Formatting correction: display clan_tag as string, not double backticks
+            embed.add_field(name="Current Clan", value=clan_tag, inline=False)
             embed.add_field(name="⚔️ War Reminders", value=war_mention, inline=True)
             embed.add_field(name="🏰 Raid Reminders", value=raid_mention, inline=True)
-            
-
             embed.add_field(name="Linked Members", value=player_info, inline=False)
             
             embed.set_footer(text=f"Serving {len(self.bot.guilds)} servers | {len(self.bot.users)} users")
@@ -304,8 +484,11 @@ class BotCommands(commands.Cog):
             await interaction.followup.send(embed=embed)
 
             cursor.close()
+            conn.close() # Always close the connection too!
         except Exception as e:
             print(f"Error in botstatus: {e}")
+            import traceback
+            traceback.print_exc()
             await interaction.followup.send(f"❌ Error fetching status: `{e}`")
 
     @app_commands.command(name='setclantag', description="Set the clan tag and optional reminder channels")
@@ -364,71 +547,205 @@ class BotCommands(commands.Cog):
 
         await interaction.response.send_message(msg)
 
-    @app_commands.command(name='link', description="Link your CoC account")
-    async def link(self, interaction: discord.Interaction, player_tag: str):
-    # 1. Defer immediately to give your DB ping and CoC API time to breathe
-        await interaction.response.defer(ephemeral=True) 
+    # --- STORE SESSION DATABASE HELPERS ---
+    def _get_user_session(self, discord_id: str):
+        """Fetches the registered Supercell Store cookie session for a Discord user."""
+        # Reuses your existing get_db_connection helper!
+        conn = get_db_connection()
+        cursor = conn.cursor(buffered=True)
+        try:
+            cursor.execute(
+                "SELECT cookies_json FROM coc_sessions WHERE discord_id = %s", 
+                (discord_id,)
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+        finally:
+            cursor.close()
+            conn.close()
 
-        clean_tag = player_tag.strip().upper()
-        if not clean_tag.startswith("#"): clean_tag = f"#{clean_tag}"
-        
-        if await check_coc_player_tag(clean_tag):
-            try:
-                conn = get_db_connection() # Get connection
-                cursor = conn.cursor(buffered=True) # Get cursor
-                
-                cursor.execute("""
-                    INSERT INTO players (discord_id, discord_username, guild_id, guild_name, player_tag, is_premium)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE 
-                        player_tag = VALUES(player_tag),
-                        discord_username = VALUES(discord_username)
-                """, (
-                    str(interaction.user.id), 
-                    interaction.user.display_name, 
-                    str(interaction.guild.id), 
-                    interaction.guild.name,
-                    clean_tag, 
-                    0
-                ))
-                
+    def _save_user_session(self, discord_id: str, cookies_json: str):
+        """Saves or updates a Discord user's cookie session."""
+        # Reuses your existing get_db_connection helper!
+        conn = get_db_connection()
+        cursor = conn.cursor(buffered=True)
+        try:
+            query = """
+                INSERT INTO coc_sessions (discord_id, cookies_json)
+                VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE 
+                    cookies_json = VALUES(cookies_json)
+            """
+            cursor.execute(query, (discord_id, cookies_json))
+            conn.commit()
+        finally:
+            cursor.close()
+            conn.close()
 
-                conn.commit() 
-                cursor.close()
-                
-                await interaction.followup.send(f"✅ Linked to **{clean_tag}**!")
-            except Exception as e:
-                print(f"DB Error: {e}")
-                await interaction.followup.send("❌ Database error occurred.")
-        else:
-            await interaction.followup.send("❌ Invalid player tag.", ephemeral=True)
+    # --- UNIFIED INTERACTIVE LINK COMMAND ---
+    @app_commands.command(name='link', description="Link your Clash of Clans account or Supercell Store.")
+    async def link(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="⚔️ Clash of Clans Integration Menu",
+            description=(
+                "Choose an integration method below to link your profiles to the bot:\n\n"
+                "**Link CoC Account:** Links your in-game profile to your Discord Account (requires playertag and API)\n"
+                "**Link SuperCell Store :**Register your Supercell Store session for automatic reward collection!"
+            ),
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text="Manage your active profiles easily!")
+        await interaction.response.send_message(embed=embed, view=LinkMenuView(self), ephemeral=True)
 
-    @app_commands.command(name='unlink', description="Unlink your CoC account")
+    # --- SECURE BACKGROUND COOKIE PROCESSOR ---
+    async def handle_cookie_upload(self, interaction, user_id, target_channel=None):
+        """Background loop waiting for the user to upload their cookie file privately in DMs."""
+        def check(m):
+            return m.author.id == user_id and m.guild is None and len(m.attachments) > 0
+
+        try:
+            msg = await self.bot.wait_for("message", check=check, timeout=120.0)
+            attachment = msg.attachments[0]
+            
+            file_bytes = await attachment.read()
+            file_str = file_bytes.decode("utf-8")
+            
+            # Validate JSON list format
+            parsed_cookies = json.loads(file_str)
+            if not isinstance(parsed_cookies, list):
+                raise ValueError("Cookie file must contain a JSON list of cookies.")
+
+            self._save_user_session(str(user_id), file_str)
+
+            success_text = "🎉 **Success!** Your Supercell Store session cookies are verified and linked securely. You can now type `/claim` in any server channel!"
+            if target_channel:
+                await target_channel.send(success_text)
+            else:
+                await msg.channel.send(success_text)
+
+        except asyncio.TimeoutError:
+            timeout_text = "⏰ **Timed Out:** You didn't upload your cookie file within 2 minutes. Click 'Link Store' in the server menu to try again!"
+            if target_channel:
+                await target_channel.send(timeout_text)
+            else:
+                await interaction.followup.send(timeout_text, ephemeral=True)
+        except (json.JSONDecodeError, ValueError):
+            err_text = "❌ **Registration Failed:** The uploaded file was not a valid exported JSON cookie list. Make sure your extension outputs in **JSON format** and try again!"
+            if target_channel:
+                await target_channel.send(err_text)
+            else:
+                await interaction.followup.send(err_text, ephemeral=True)
+        except Exception as e:
+            print(f"💥 System/DB Error loading session: {e}")
+            err_text = f"❌ **System Error:** Failed to link your store profile: `{e}`"
+            if target_channel:
+                await target_channel.send(err_text)
+            else:
+                await interaction.followup.send(err_text, ephemeral=True)
+
+    # --- UNIFIED GLOBAL UNLINK COMMAND ---
+    @app_commands.command(name='unlink', description="Unlink your Clash of Clans account globally from the bot.")
     async def unlink(self, interaction: discord.Interaction):
-        # ALWAYS defer if you're hitting the DB. 
         await interaction.response.defer(ephemeral=True)
 
         try:
             conn = get_db_connection()
             cursor = conn.cursor(buffered=True)
             
-            
+            # Deletes their global link mapping
             cursor.execute(
-                "DELETE FROM players WHERE discord_id = %s AND guild_id = %s", 
-                (str(interaction.user.id), str(interaction.guild.id))
+                "DELETE FROM players WHERE discord_id = %s", 
+                (str(interaction.user.id),)
             )
-            
             conn.commit()
             
             if cursor.rowcount > 0:
-                await interaction.followup.send("✅ Your Clash of Clans account has been unlinked from this server.")
+                await interaction.followup.send("✅ Your Clash of Clans account has been cleanly unlinked from the bot.")
             else:
-                await interaction.followup.send("❌ You don't have an account linked in this server.")
+                await interaction.followup.send("❌ You do not have an account linked to the bot.")
             
             cursor.close()
+            conn.close()
         except Exception as e:
             print(f"DB Error in Unlink: {e}")
             await interaction.followup.send("❌ An error occurred while unlinking.")
+
+    # --- CLAIM COMMAND ---
+    @app_commands.command(
+        name="claim", 
+        description="Manually claims rewards and checks mission progress for your registered account."
+    )
+    async def claim(self, interaction: discord.Interaction):
+        print(f"\n📥 [Discord] /claim command triggered by {interaction.user.name}!")
+        await interaction.response.defer(thinking=True)
+
+        try:
+            cookies_json_str = self._get_user_session(str(interaction.user.id))
+            
+            if not cookies_json_str:
+                print(f"❌ [Discord] {interaction.user.name} is not registered.")
+                embed = discord.Embed(
+                    title="⚠️ Registration Required",
+                    description=(
+                        "You haven't linked a Supercell Store session to your Discord account yet!\n\n"
+                        "**How to register:**\n"
+                        "1. Run `/link` and click **Link Store (Cookies)**.\n"
+                        "2. Drop your exported cookie file into your secure DM channel!"
+                    ),
+                    color=discord.Color.orange()
+                )
+                await interaction.followup.send(embed=embed)
+                return
+
+            print(f"🚀 [Discord] Running Playwright worker for {interaction.user.name}...")
+            data = await run_mission_worker(str(interaction.user.id), cookies_json_str)
+            print("🛰️ [Discord] Playwright worker finished execution.")
+
+            if not data.get("success", False):
+                error_msg = data.get("error", "Unknown Error")
+                print(f"❌ [Discord] Worker failed: {error_msg}")
+                embed = discord.Embed(
+                    title="⚠️ Claim Failed",
+                    description=f"Reason: `{error_msg}`\n\nIf your session expired, run `/link` and update your store cookies again.",
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed)
+                return
+
+            claimed_rewards = data["claimed"]
+            embed = discord.Embed(
+                title="Store Claim Status",
+                description=f"Successfully claimed **{claimed_rewards}** rewards!",
+                color=discord.Color.green() if claimed_rewards > 0 else discord.Color.gold()
+            )
+
+            if data.get("missions"):
+                for mission in data["missions"]:
+                    is_completed = "COMPLETED" in mission["progress"].upper()
+                    status_emoji = "✅" if is_completed else "⏳"
+                    
+                    embed.add_field(
+                        name=f"{status_emoji} {mission['title']}",
+                        value=f"Progress: `{mission['progress']}` | Reward: `{mission['reward']}`",
+                        inline=False
+                    )
+            else:
+                embed.add_field(
+                    name="ℹ️ No Missions Found",
+                    value="Could not parse any active missions right now.",
+                    inline=False
+                )
+
+            embed.set_footer(text="Keep Clashing, Chief! ⚔️")
+            await interaction.followup.send(embed=embed)
+            print("✅ [Discord] Embed successfully sent to user.")
+
+        except Exception as e:
+            print(f"💥 [Discord] CRITICAL ERROR in slash command execution: {e}")
+            try:
+                await interaction.followup.send(f"⚠️ A critical error occurred inside the bot: `{e}`")
+            except Exception:
+                pass
 
 
     

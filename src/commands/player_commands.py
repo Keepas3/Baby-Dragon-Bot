@@ -1,6 +1,5 @@
 
 import sys
-
 import discord
 import time
 import coc
@@ -20,14 +19,14 @@ class PlayerCommands(commands.Cog):
 
     @app_commands.command(name="playerinfo", description="Get player's general information")
     @app_commands.describe(user="Select a Discord user", player_tag="The user's tag (optional)")
-    async def player_info(self, interaction: discord.Interaction, user: discord.Member = None, player_tag: str = None):
+    async def player_info(self, interaction: discord.Interaction, user: discord.User = None, player_tag: str = None):
         await interaction.response.defer()
 
         try:
-            guild_id = str(interaction.guild.id)
+         #   guild_id = str(interaction.guild.id)
             
             # Assuming fetch_player_from_DB is updated to handle string IDs
-            tag = fetch_player_from_DB(guild_id, user, player_tag)
+            tag = fetch_player_from_DB(None, user, player_tag)
             player_data = await get_player_data(tag)
             
             player_labels = ", ".join(label.name for label in player_data.labels) if player_data.labels else "None"
@@ -42,7 +41,7 @@ class PlayerCommands(commands.Cog):
             display_role = role_mapping.get(str(player_data.role).lower(), str(player_data.role).capitalize())
 
             embed = discord.Embed(
-                title=f"User: {player_data.name} ({player_data.tag})",
+                title=f"User: {player_data.name} {player_data.tag}",
                 description=f"{player_labels}\nLast updated: <t:{timestamp}:R>",
                 color=0x0000FF
             )
@@ -93,7 +92,7 @@ class PlayerCommands(commands.Cog):
         app_commands.Choice(name="Both Villages", value="both")
     ])
     async def player_troops(self, interaction: discord.Interaction, 
-                             user: discord.Member = None, 
+                             user: discord.User = None, 
                              player_tag: str = None, 
                              village: str = "home"):
         
@@ -101,8 +100,8 @@ class PlayerCommands(commands.Cog):
         
         try:
             # 1. Setup Identity & Data
-            guild_id = str(interaction.guild.id)
-            tag = fetch_player_from_DB(guild_id, user, player_tag)
+         #   guild_id = str(interaction.guild.id)
+            tag = fetch_player_from_DB(None, user, player_tag)
             player_data = await get_player_data(tag)
 
             exclude = ['super', 'sneaky', 'ice golem', 'inferno', 'rocket balloon', 'ice hound']
@@ -159,10 +158,10 @@ class PlayerCommands(commands.Cog):
             await interaction.followup.send("❌ An error occurred while fetching player data.", ephemeral=True)
 
     @app_commands.command(name="playerheroes", description="Get info on player's heroes, equipment, and pets")
-    async def player_equips(self, interaction: discord.Interaction, user: discord.Member = None, player_tag: str = None):
+    async def player_equips(self, interaction: discord.Interaction, user: discord.User = None, player_tag: str = None):
         """Displays all equipment in a single list sorted by level."""
         try:
-            tag = fetch_player_from_DB(interaction.guild.id, user, player_tag)
+            tag = fetch_player_from_DB(None, user, player_tag)
             player_data = await get_player_data(tag)
 
             builder_heroes = ['Battle Machine', 'Battle Copter']

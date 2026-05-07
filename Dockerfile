@@ -1,19 +1,23 @@
-# 1. Use a standard Python image
+# 1. Start with your required Python version
 FROM python:3.11-slim
 
-# 2. Set the working directory INSIDE the container to the Root
+# 2. Set the working directory inside the container
 WORKDIR /app
 
-
+# 3. Copy only requirements first (leverages Docker cache)
 COPY requirements.txt .
 
-# 4. Install dependencies
+# 4. Install your Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 5. Tell Playwright to download Chromium AND its OS-level system dependencies
+RUN playwright install --with-deps chromium
+
+# 6. Copy the rest of your bot's files
 COPY . .
 
-# 6. Set the Python path so it can find your modules inside src
+# 7. Set your PYTHONPATH
 ENV PYTHONPATH="/app:/app/src"
 
-
+# 8. Fire up the engine
 CMD ["python", "src/main.py"]

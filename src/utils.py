@@ -31,7 +31,7 @@ def fetch_clan_from_db(guild_id: int, provided_tag: str = None) -> str:
     raise ClanNotSetError()
 
 
-def fetch_player_from_DB(guild_id: int, user=None, provided_tag: str = None, cursor=None) -> str:
+def fetch_player_from_DB(guild_id, user=None, provided_tag: str = None, cursor=None) -> str:
     """Fetches player tag, reusing existing cursor if provided."""
     if provided_tag:
         return provided_tag.strip().upper()
@@ -44,8 +44,8 @@ def fetch_player_from_DB(guild_id: int, user=None, provided_tag: str = None, cur
         
         try:
             cursor.execute(
-                "SELECT player_tag FROM players WHERE discord_id = %s AND guild_id = %s", 
-                ((user.id), (guild_id))
+                "SELECT player_tag FROM players WHERE discord_id = %s", 
+                ((user.id),)
             )
             row = cursor.fetchone()
             if row and row[0]:

@@ -106,7 +106,7 @@ async def on_guild_remove(guild):
 if __name__ == "__main__":
     # Helps prevent loop errors on local Windows machines
     if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
         
     try:
         asyncio.run(setup())

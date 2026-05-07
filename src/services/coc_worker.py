@@ -1,55 +1,88 @@
+# src/services/coc_worker.py
 import asyncio
 import random
 import json
 from pathlib import Path
 from playwright.async_api import async_playwright
 
-# Dynamically find the absolute path to your 'DRAGON-BOT' root folder
-# Moves up 3 levels from: src/services/coc_worker.py -> src/services -> src -> DRAGON-BOT
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-CONFIG_PATH = ROOT_DIR / "config"
+def clean_and_format_cookies(raw_cookies_list):
+    """
+    Cleans raw browser cookies from typical extensions (like EditThisCookie) 
+    and translates them into Playwright-compliant formats.
+    """
+    cleaned = []
+    for cookie in raw_cookies_list:
+        # Build base dictionary
+        c = {
+            "name": cookie.get("name"),
+            "value": cookie.get("value"),
+            "domain": cookie.get("domain"),
+            "path": cookie.get("path", "/"),
+        }
+        
+        # Translate expiration parameters
+        if "expirationDate" in cookie:
+            c["expires"] = cookie["expirationDate"]
+        elif "expires" in cookie:
+            c["expires"] = cookie["expires"]
+            
+        if "httpOnly" in cookie:
+            c["httpOnly"] = cookie["httpOnly"]
+        if "secure" in cookie:
+            c["secure"] = cookie["secure"]
+            
+        # Translate SameSite restrictions
+        same_site = cookie.get("sameSite", "Lax")
+        if same_site == "no_restriction":
+            c["sameSite"] = "None"
+        elif same_site in ["Lax", "Strict", "None"]:
+            c["sameSite"] = same_site
+        else:
+            c["sameSite"] = "Lax" # Safe default fallback
+            
+        cleaned.append(c)
+    return cleaned
 
-async def run_mission_worker():
-    # Load config from the secure config directory
+async def run_mission_worker(player_tag: str, cookies_json_str: str):
     try:
-        config_file = CONFIG_PATH / "browser_config.json"
-        with open(config_file, "r") as f:
-            cfg = json.load(f)
-    except FileNotFoundError:
-        return {"success": False, "error": f"Config file missing at {config_file}"}
+        # 1. Parse and clean the raw cookie data
+        raw_cookies = json.loads(cookies_json_str)
+        playwright_cookies = clean_and_format_cookies(raw_cookies)
+    except Exception as e:
+        return {"success": False, "error": f"Failed to parse user cookie data: {e}"}
 
     results = {"success": False, "claimed": 0, "missions": []}
 
+    # Standard browser user-agent to ensure natural behavior on Railway containers
+    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
     async with async_playwright() as p:
-        # Launch headless for Discord bot performance
+        # Launch headless for high-efficiency container execution
         browser = await p.chromium.launch(headless=True) 
         
-        # Reference auth.json inside the config directory
-        auth_file = CONFIG_PATH / "auth.json"
+        # Open a fresh context
         context = await browser.new_context(
-            storage_state=str(auth_file),
-            user_agent=cfg["user_agent"],
-            viewport=cfg["viewport"] 
+            user_agent=user_agent,
+            viewport={'width': 1000, 'height': 800}
         )
+        
+        # 2. Inject the cleaned cookies directly into the session!
+        await context.add_cookies(playwright_cookies)
         page = await context.new_page()
 
-        # Inject session
-        init_script = f"const data={cfg['session_storage']}; for(const [k,v] of Object.entries(data)) sessionStorage.setItem(k,v);"
-        await page.add_init_script(init_script)
-
         try:
-            # Navigate with a 30s safety timeout
+            # Navigate directly to store
             await page.goto("https://store.supercell.com/clashofclans", wait_until="networkidle", timeout=30000)
 
-            # Verification
+            # Verification: Check if browser is redirected back to the Log In stage
             login_btn = page.get_by_role("button", name="Log In")
             try:
                 await login_btn.wait_for(state="visible", timeout=4000)
-                return {"success": False, "error": "Auth expired. Run auth_manager.py again."}
+                return {"success": False, "error": "Auth cookies expired or invalid. Please re-export and run /register again."}
             except:
-                pass # Successfully logged in
+                pass # Successfully logged in via cookies!
 
-            # Trigger Modal
+            # Trigger Web Store Modal elements
             await page.mouse.wheel(0, 500) 
             await page.wait_for_timeout(1500) 
 
@@ -74,7 +107,7 @@ async def run_mission_worker():
             await page.get_by_role("button", name="Missions").click()
             await page.wait_for_timeout(1000)
 
-            # Scrape using your partial class selectors
+            # Scrape mission metrics
             mission_cards = page.locator('[class*="bonusMissionItem_item__"]')
             m_count = await mission_cards.count()
 
@@ -101,8 +134,3 @@ async def run_mission_worker():
             await browser.close()
             
     return results
-
-if __name__ == "__main__":
-    # Test run
-    data = asyncio.run(run_mission_worker())
-    print(json.dumps(data, indent=2))
