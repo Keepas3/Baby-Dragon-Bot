@@ -232,19 +232,25 @@ class BotCommands(commands.Cog):
       
         summary_embed = discord.Embed(
             title="🐉 Dragon Bot | Quick Guide",
-            description="**[G]** Global | **[C]** Clan/Server Only\nClick the button for the full list!",
+            description="**[G]** Global | **[C]** Clan/Server Only\nClick the button for the description of commands!",
             color=0x00FF00
         )
         
         summary_embed.add_field(
             name="🛡️ Clan Core", 
-            value="`[C]` `/claninfo` | `/currentwar` | `/capitalraid` | `/clanmembers`", 
+            value=(
+                "> `[C]` `/claninfo` · `/clanmembers` · `/capitalraid` · `/previousraids` \n"
+                "> `[C]` `/currentwar` · `/warlog` · `/cwlprep` · `/cwlclansearch` · `/cwlschedule` \n"
+                "> `[G]` `/clansearch`"
+            ),
             inline=False
-        )
 
         summary_embed.add_field(
             name="⚔️ Player Core",
-            value="`[G]` `/playerinfo` | `/playerheroes` | `/playerlevels`", 
+             value=(
+                "> `[G]` `/playerinfo` · `/playerlevels` · `/playerheroes` \n"
+                "> `[C]` `/searchmember` (Find player in clan)"
+            ),
             inline=False
         )
         
@@ -256,20 +262,35 @@ class BotCommands(commands.Cog):
             ),
             inline=False
         )
+        summary_embed.add_field(
+            name="**Extras**",
+            value=(
+                "> `[G]` `/flipcoin` · `/help` · `/about` · `/receiveposts` (Reddit Leaks) \n"
+                
+            ),
+            inline=False
+        )
 
-       
+       =
         full_embed = discord.Embed(
             title="🐉 Dragon Bot | Master Command List",
-            description="Complete list of all available commands.\n**[G]** Global | **[C]** Clan/Server Only",
+            description="Complete list of all available commands.\n**[G]** Global | **[C]** Commands only work in clans/servers",
             color=0x00FF00
         )
 
         full_embed.add_field(
             name="🛡️ Clan Management",
             value=(
-                "> `[C]` `/claninfo` · `/clanmembers` · `/capitalraid` · `/previousraids` \n"
-                "> `[C]` `/currentwar` · `/warlog` · `/cwlprep` · `/cwlclansearch` · `/cwlschedule` \n"
-                "> `[G]` `/clansearch`"
+                "> [C] `/claninfo` — General clan overview\n"
+                "> [C] `/clanmembers` — Members ranked by leagues\n"
+                "> [G] `/clansearch` — Search for a clan by name\n"
+                "> [C] `/capitalraid` — Current Raid Weekend progress\n"
+                "> [C] `/previousraids` — History of past Raid seasons\n"
+                "> [C] `/currentwar` — Stats & Info for War/CWL\n"
+                "> [C] `/warlog` — Check recent war history\n"
+                "> [C] `/cwlprep` — Scout matchup levels for current CWL\n"
+                "> [C] `/cwlschedule` — View CWL rounds and opponents\n"
+                "> [C] `/cwlclansearch` — Search opponent rosters and levels"
             ),
             inline=False
         )
@@ -277,8 +298,10 @@ class BotCommands(commands.Cog):
         full_embed.add_field(
             name="⚔️ Player Tools",
             value=(
-                "> `[G]` `/playerinfo` · `/playerlevels` · `/playerheroes` \n"
-                "> `[C]` `/searchmember` (Find player in clan)"
+                "> [G] `/playerinfo` — General stats and clan-related info\n"
+                "> [G] `/playerlevels` — Troops & Siege levels\n"
+                "> [G] `/playerheroes` — Check heroes, pets and equipment levels\n"
+                "> [C] `/searchmember` — Find a player in your current clan"
             ),
             inline=False
         )
@@ -286,8 +309,10 @@ class BotCommands(commands.Cog):
         full_embed.add_field(
             name="⚙️ Settings & Admin",
             value=(
-                "> `[C]` `/setclantag` · `/disable_reminders` · `/botstatus` \n"
-                "> `[G]` `/link` · `/unlink` (Connect CoC or Store account)"
+                "> [C] `/setclantag` — Link clan and set reminder channels\n"
+                "> [C] `/disable_reminders` — Mute War or Raid pings (Admins)\n"
+                "> [C] `/botstatus` — View current server config\n"
+                "> [G] `/link` / `/unlink` — Connect/disconnect CoC tag to Discord"
             ),
             inline=False
         )
@@ -295,7 +320,10 @@ class BotCommands(commands.Cog):
         full_embed.add_field(
             name="**Extras**",
             value=(
-                "> `[G]` `/flipcoin` · `/help` · `/about` · `/receiveposts` (Reddit Leaks) \n"
+                "> [G] `/flipcoin` — Flips a coin \n"
+                "> [G] `/about` — Displays info about Dragon Bot \n"
+                "> [G] `/receiveposts` — Receive posts from Reddit; default subreddit is ClashOfClansLeaks\n"
+                "> [G] `/help` — This command"
                 
             ),
             inline=False
