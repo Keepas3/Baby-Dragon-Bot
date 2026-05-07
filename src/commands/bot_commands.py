@@ -34,16 +34,27 @@ from utils import (
 
 class HelpView(ui.View):
     def __init__(self, summary_embed, full_embed):
-        super().__init__(timeout=120)
+        super().__init__(timeout=1200)
+        self.message = None
         self.summary_embed = summary_embed
         self.full_embed = full_embed
         self.showing_all = False
-
+        
+    async def on_timeout(self):
+        if self.message:
+            for item in self.children:
+                item.disabled = True
+    
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass # Message might have been deleted already
+                
     @ui.button(label="Show All Commands", style=discord.ButtonStyle.blurple)
     async def toggle_help(self, interaction: discord.Interaction, button: ui.Button):
         if not self.showing_all:
             button.label = "Show Less"
-            button.style = discord.ButtonStyle.gray # Change color for "Show Less"
+            button.style = discord.ButtonStyle.gray 
             self.showing_all = True
             await interaction.response.edit_message(embed=self.full_embed, view=self)
             
@@ -244,6 +255,7 @@ class BotCommands(commands.Cog):
                 "> `[G]` `/clansearch`"
             ),
             inline=False
+        )
 
         summary_embed.add_field(
             name="⚔️ Player Core",
@@ -271,7 +283,6 @@ class BotCommands(commands.Cog):
             inline=False
         )
 
-       =
         full_embed = discord.Embed(
             title="🐉 Dragon Bot | Master Command List",
             description="Complete list of all available commands.\n**[G]** Global | **[C]** Commands only work in clans/servers",
@@ -334,6 +345,7 @@ class BotCommands(commands.Cog):
         # Re-using your HelpView logic to toggle between them
         view = HelpView(summary_embed, full_embed)
         await interaction.response.send_message(embed=summary_embed, view=view)
+        view.message = await interaction.original_response()
 
     # ... (rest of your commands like receive_posts, flipcoin, etc., stay below here) ...
     @app_commands.command(name="receiveposts", description="Receive posts from Reddit")
