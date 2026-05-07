@@ -612,8 +612,9 @@ class WarPatrol(commands.Cog):
                     # Sort and Slice by team_size
                     our_members = sorted(war_data.clan.members, key=lambda x: x.map_position or 99)
                     active_lineup = our_members[:war_data.team_size]
-                    
-                    cursor.execute("SELECT player_tag, discord_id FROM players WHERE guild_id = %s", (str(guild_id),))
+
+                    # Pass the member's tag from the API, not the server's ID
+                    cursor.execute("SELECT discord_id FROM players WHERE player_tag = %s", (member.tag,))
                     links = {row[0]: row[1] for row in cursor.fetchall()}
                     
                     unattacked_lines = []
