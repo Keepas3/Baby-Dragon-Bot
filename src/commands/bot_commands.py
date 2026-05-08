@@ -34,7 +34,7 @@ from utils import (
 
 class HelpView(ui.View):
     def __init__(self, summary_embed, full_embed):
-        super().__init__(timeout=1200)
+        super().__init__(timeout=300)
         self.message = None
         self.summary_embed = summary_embed
         self.full_embed = full_embed
@@ -139,7 +139,7 @@ class CoCLinkModal(discord.ui.Modal, title="Link Clash of Clans Account"):
             await interaction.followup.send("❌ Invalid player tag format.", ephemeral=True)
 
 
-# --- 🛒 UPDATED GLOBAL LINK MENU VIEW ---
+
 class LinkMenuView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=180)
@@ -151,12 +151,12 @@ class LinkMenuView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
 
-    @discord.ui.button(label="Link CoC Account", style=discord.ButtonStyle.primary, emoji="🏰")
+    @discord.ui.button(label="Link CoC Account", style=discord.ButtonStyle.primary)
     async def link_coc(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Clean & Simple: Opens the modal globally.
         await interaction.response.send_modal(CoCLinkModal(self.cog))
 
-    @discord.ui.button(label="Link Store (Cookies)", style=discord.ButtonStyle.success, emoji="🛒")
+    @discord.ui.button(label="Link Store (Cookies)", style=discord.ButtonStyle.success)
     async def link_store(self, interaction: discord.Interaction, button: discord.ui.Button):
         is_dm = interaction.guild is None
 

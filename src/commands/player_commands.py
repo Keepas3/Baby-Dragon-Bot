@@ -23,10 +23,11 @@ class PlayerCommands(commands.Cog):
         await interaction.response.defer()
 
         try:
+            target_user = user or interaction.user
          #   guild_id = str(interaction.guild.id)
             
             # Assuming fetch_player_from_DB is updated to handle string IDs
-            tag = fetch_player_from_DB(None, user, player_tag)
+            tag = fetch_player_from_DB(None, target_user, player_tag)
             player_data = await get_player_data(tag)
             
             player_labels = ", ".join(label.name for label in player_data.labels) if player_data.labels else "None"
@@ -99,9 +100,8 @@ class PlayerCommands(commands.Cog):
         await interaction.response.defer()
         
         try:
-            # 1. Setup Identity & Data
-         #   guild_id = str(interaction.guild.id)
-            tag = fetch_player_from_DB(None, user, player_tag)
+            target_user = user or interaction.user
+            tag = fetch_player_from_DB(None, target_user, player_tag)
             player_data = await get_player_data(tag)
 
             exclude = ['super', 'sneaky', 'ice golem', 'inferno', 'rocket balloon', 'ice hound']
@@ -161,7 +161,8 @@ class PlayerCommands(commands.Cog):
     async def player_equips(self, interaction: discord.Interaction, user: discord.User = None, player_tag: str = None):
         """Displays all equipment in a single list sorted by level."""
         try:
-            tag = fetch_player_from_DB(None, user, player_tag)
+            target_user = user or interaction.user
+            tag = fetch_player_from_DB(None, target_user, player_tag)
             player_data = await get_player_data(tag)
 
             builder_heroes = ['Battle Machine', 'Battle Copter']
