@@ -94,14 +94,47 @@ async def run_mission_worker(player_tag: str, cookies_json_str: str):
             await page.wait_for_selector("text=BONUS TRACK", timeout=8000)
 
             # --- TAB 1: BONUSES ---
-            claim_btns = page.get_by_role("button", name="CLAIM")
-            claimed_count = await claim_btns.count()
+            claim_btns = page.get_by_role("button", name="CLAIM",exact = True)
+            actual_claims = 0
             
-            if claimed_count > 0:
-                for i in range(claimed_count):
-                    await claim_btns.nth(0).click()
-                    await page.wait_for_timeout(random.randint(1500, 2500))
-                results["claimed"] = claimed_count
+            # Re-fetch count after filtering for exact matches
+            button_count = await claim_btns.count()
+            
+            if button_count > 0:
+                for i in range(button_count):
+                    try:
+                        # Always click the first one available in the list
+                        await claim_btns.nth(0).click(force=True, timeout=5000)
+                        actual_claims += 1
+                        await page.wait_for_timeout(random.randint(1500, 2500))
+                    except:
+                        continue
+                
+                results["claimed"] = actual_claims
+
+            # --- TAB 1: BONUSES (After claiming loop) ---
+            
+            try:
+                # 1. Wait a moment for UI to settle after potential clicks
+                await page.wait_for_timeout(1000)
+                
+                # 2. Get all bonus track items using a partial class match
+                bonus_items = page.locator('[class*="bonusTrackItem_item__"]')
+                count = await bonus_items.count()
+                
+                for i in range(count):
+                    item = bonus_items.nth(i)
+                    content = await item.inner_text()
+                    
+                    # If it doesn't say "Claimed", it's the next reward in line!
+                    if "Claimed" not in content:
+                        # Clean up formatting: "70 PTS\nto 100 Gems" -> "70 PTS to 100 Gems"
+                        results["next_reward"] = " ".join(content.split())
+                        print(f"DEBUG: Found next reward: {results['next_reward']}")
+                        break
+            except Exception as e:
+                print(f"DEBUG: Scraper failed to find next reward: {e}")
+                results["next_reward"] = None
 
             # --- TAB 2: MISSIONS ---
             await page.get_by_role("button", name="Missions").click()

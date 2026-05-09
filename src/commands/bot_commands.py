@@ -521,22 +521,6 @@ class BotCommands(commands.Cog):
                 war_mention = "`❌ Not Configured`"
                 raid_mention = "`❌ Not Configured`"
 
-            # 2. Fetch Linked Players globally, filtered to ONLY members of this server
-            # We fetch all member IDs currently in this server guild
-            member_ids = [str(member.id) for member in interaction.guild.members]
-            players = []
-
-            if member_ids:
-                # Reconstruct an SQL "IN" clause: WHERE discord_id IN (%s, %s, %s...)
-                placeholders = ','.join(['%s'] * len(member_ids))
-                query = f"SELECT discord_username, player_tag FROM players WHERE discord_id IN ({placeholders})"
-                
-                cursor.execute(query, tuple(member_ids))
-                players = cursor.fetchall()
-
-            player_info = "\n".join([f"• @{u} (`{t}`)" for u, t in players]) if players else "` No Linked Members `"
-
-            # 3. Build the Polished Embed
             embed = discord.Embed(
                 title=f"🛡️ {interaction.guild.name} Configuration",
                 color=0x3498db,
@@ -547,7 +531,6 @@ class BotCommands(commands.Cog):
             embed.add_field(name="Current Clan", value=clan_tag, inline=False)
             embed.add_field(name="⚔️ War Reminders", value=war_mention, inline=True)
             embed.add_field(name="🏰 Raid Reminders", value=raid_mention, inline=True)
-            embed.add_field(name="Linked Members", value=player_info, inline=False)
             
             embed.set_footer(text=f"Serving {len(self.bot.guilds)} servers | {len(self.bot.users)} users")
             
@@ -784,9 +767,16 @@ class BotCommands(commands.Cog):
             claimed_rewards = data["claimed"]
             embed = discord.Embed(
                 title="Store Claim Status",
-                description=f"Successfully claimed **{claimed_rewards}** rewards!",
+                description=f"Successfully claimed **{claimed_rewards}** reward(s)!",
                 color=discord.Color.green() if claimed_rewards > 0 else discord.Color.gold()
             )
+
+            if data.get("next_reward"):
+                embed.add_field(
+                    name="🎯 Next Bonus Progress", 
+                    value=f"{data['next_reward']}", 
+                    inline=False
+                )
 
             if data.get("missions"):
                 for mission in data["missions"]:
@@ -907,8 +897,6 @@ class BotCommands(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"❌ Failed to update settings: {e}")
 
-    # Ensure you have 'import praw' at the top of your file!
-    # The reddit instance should be initialized in your __init__ or globally
     
 async def setup(bot):
     await bot.add_cog(BotCommands(bot))
