@@ -39,27 +39,31 @@ async def initialize_coc():
         print(f"❌ CoC Login Failed: {e}")
 
 def connect_db():
-    # Priority 1: Internal Railway Network (Fastest & Most Stable)
-    # Priority 2: Public Proxy (Only if internal fails/local)
-    # Priority 3: Localhost
-    host = os.getenv("MYSQLHOST", os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "localhost"))
-    port = os.getenv("MYSQLPORT", os.getenv("RAILWAY_TCP_PROXY_PORT", "3306"))
+    # 1. Check for Internal Railway Host
+    internal_host = os.getenv("MYSQLHOST")
     
-    user = os.getenv("MYSQLUSER", "root")
-    password = os.getenv("MYSQLPASSWORD")
-    database = os.getenv("MYSQLDATABASE")
-    
-    print(f"Connecting via {'INTERNAL' if os.getenv('MYSQLHOST') else 'PUBLIC'} network to {host}:{port}...")
+    if internal_host:
+        #  we MUST use 3306 as the port for internal connections, even if the env var says otherwise. Railway's internal routing expects this.
+        host = internal_host
+        port = os.getenv("MYSQLPORT", "3306") 
+        conn_type = "INTERNAL"
+    else:
+        # 2. Fallback to Public Proxy
+        host = os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "localhost")
+        port = os.getenv("RAILWAY_TCP_PROXY_PORT", "3306")
+        conn_type = "PUBLIC/PROXY"
+
+    print(f"Connecting via {conn_type} network to {host}:{port}...")
 
     return mysql.connector.connect(
         host=host, 
-        user=user, 
-        password=password, 
-        database=database, 
+        user=os.getenv("MYSQLUSER", "root"), 
+        password=os.getenv("MYSQLPASSWORD"), 
+        database=os.getenv("MYSQLDATABASE"), 
         port=int(port), 
         autocommit=True,
         buffered=True,
-        connect_timeout=10 #
+        connect_timeout=10
     )
 
 db_connection = None
