@@ -773,7 +773,7 @@ class BotCommands(commands.Cog):
 
             if data.get("next_reward"):
                 embed.add_field(
-                    name="🎯 Next Bonus Progress", 
+                    name="Next Item Progress", 
                     value=f"{data['next_reward']}", 
                     inline=False
                 )

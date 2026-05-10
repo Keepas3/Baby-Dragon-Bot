@@ -354,8 +354,14 @@ class RaidPatrol(commands.Cog):
         if not cursor: return
 
         try:
+            # 1. Fetch tracked servers from the 'servers' table
             cursor.execute("SELECT clan_tag, guild_id, raid_channel_id, last_raid_reminder FROM servers")
             tracked_servers = cursor.fetchall()
+
+            # 2. GLOBAL LINK LOOKUP: Fetch all linked accounts once to save DB calls
+            # We removed 'WHERE guild_id' because players are now global
+            cursor.execute("SELECT player_tag, discord_id FROM players")
+            links = {row[0]: row[1] for row in cursor.fetchall()}
 
             for tag, guild_id, raid_channel_id, last_sent in tracked_servers:
                 if not tag or not raid_channel_id: continue
@@ -365,27 +371,21 @@ class RaidPatrol(commands.Cog):
                     if not raids: continue
                     raid = raids[0]
 
-                    # 3. RESET LOGIC
+                    # 3. RESET LOGIC: Clear reminder status if raid weekend is over
                     if raid.state != "ongoing":
                         if last_sent is not None:
                             cursor.execute("UPDATE servers SET last_raid_reminder = NULL WHERE clan_tag = %s", (tag,))
                             get_db_connection().commit()
                         continue
                     
-                    # 4. SIMPLIFIED TIME & TRIGGER LOGIC
+                    # 4. TRIGGER LOGIC: 24 hours remaining
                     hours_left = raid.end_time.seconds_until / 3600
-                    
-                    # Only trigger if within 24 hours AND we haven't sent the 24h reminder yet
                     if hours_left > 24 or last_sent == "24h":
                         continue
 
                     reminder_type = "24h"
 
-                    # 5. SLACKERS ( catching 0-hitters)
-                    # Fetch Discord links
-                    cursor.execute("SELECT player_tag, discord_id FROM players WHERE guild_id = %s", (str(guild_id),))
-                    links = {row[0]: row[1] for row in cursor.fetchall()}
-                    
+                    # 5. FIND PENDING ATTACKS
                     full_clan = await self.coc_client.get_clan(tag)
                     participants = {m.tag: m.attack_count for m in raid.members}
                     
@@ -394,17 +394,16 @@ class RaidPatrol(commands.Cog):
                         hits_done = participants.get(clan_member.tag, 0)
                         
                         if hits_done < 6:
-                            d_id = links.get(clan_member.tag)
-                            # Since this is our only reminder, we use the Mention/Ping logic
-                            if d_id:
-                                mention = f"<@{d_id}>"
-                            else:
-                                mention = f"**{clan_member.name[:10]}**"
+                            # 🔗 Link Status Indicator
+                            # We check if the tag exists in our global 'links' dictionary
+                            status_icon = "🔗" if clan_member.tag in links else "❌"
                             
-                            unattacked_lines.append(f"• {mention} ({hits_done}/6 hits)")
+                            # Display as plain text (No <@ID> mention) to prevent pings
+                            unattacked_lines.append(f"• {status_icon} **{clan_member.name}** ({hits_done}/6 hits)")
 
-                    # 6. SEND REMINDER
+                    # 6. SEND EMBED
                     if unattacked_lines:
+                        # Attempt to find the channel
                         channel = self.bot.get_channel(int(raid_channel_id)) or await self.bot.fetch_channel(int(raid_channel_id))
                         
                         try: unix_ts = int(raid.end_time.time.timestamp())
@@ -416,18 +415,19 @@ class RaidPatrol(commands.Cog):
                             color=0xFFCC00 # Yellow warning color
                         )
                         
+                        # Limit the display to prevent the embed from being too long
                         val = "\n".join(unattacked_lines[:25]) or "Everyone has finished!"
                         embed.add_field(name="Pending Attacks", value=val[:1024], inline=False)
                         
                         loot = getattr(raid, 'total_loot', getattr(raid, 'capital_resources_looted', 0))
                         embed.add_field(name="Total Capital Looted", value=f"`{loot:,}`", inline=True)
                         embed.add_field(name="⏳ Ends", value=f"<t:{unix_ts}:R>", inline=True)
-                        embed.set_footer(text=f"Clan Tag: {tag}")
+                        embed.set_footer(text=f"Clan Tag: {tag} | 🔗 = Linked to Discord")
 
                         await channel.send(embed=embed)
                         print(f"✅ SUCCESS: Sent 24h raid reminder for {tag}")
 
-                        # Update DB inside the block to ensure we only "finish" the task if sent
+                        # Update DB to prevent duplicate pings for this raid session
                         cursor.execute("UPDATE servers SET last_raid_reminder = %s WHERE clan_tag = %s", (reminder_type, tag))
                         get_db_connection().commit()
 

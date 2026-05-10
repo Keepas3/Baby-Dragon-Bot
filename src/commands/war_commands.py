@@ -547,15 +547,23 @@ class WarPatrol(commands.Cog):
         if not cursor: return
 
         try:
+            # 1. Fetch tracked servers
             cursor.execute("SELECT clan_tag, guild_id, war_channel_id, last_war_reminder FROM servers")
             tracked_clans = cursor.fetchall()
+
+            # 2. GLOBAL LINK LOOKUP: Fetch all linked accounts once
+            # This avoids the 'Unknown column guild_id' error and reduces DB load
+            cursor.execute("SELECT player_tag, discord_id FROM players")
+            links = {row[0]: row[1] for row in cursor.fetchall()}
 
             for clan_tag, guild_id, war_channel_id, last_sent in tracked_clans:
                 if not clan_tag or not war_channel_id: continue 
 
                 try:
-                    # 2. FETCH DATA
+                    # 3. FETCH WAR DATA
                     war_data = await self.coc_client.get_current_war(clan_tag)
+                    
+                    # CWL Check
                     if not war_data or war_data.state == "notInWar":
                         try:
                             group = await self.coc_client.get_league_group(clan_tag)
@@ -565,8 +573,7 @@ class WarPatrol(commands.Cog):
                                         war_data = cwl_war; break
                         except: pass
 
-                    # 3. TRANSITION & SUMMARY LOGIC
-                    # Check if war just ended
+                    # 4. TRANSITION LOGIC
                     if war_data and war_data.state == "warEnded":
                         if last_sent != "summary_sent":
                             await self.send_war_summary(guild_id, war_channel_id, war_data, clan_tag)
@@ -574,19 +581,16 @@ class WarPatrol(commands.Cog):
                             get_db_connection().commit()
                         continue
 
-                    # Reset flag if a new war is in preparation
                     if not war_data or war_data.state == "preparation":
                         if last_sent is not None:
                             cursor.execute("UPDATE servers SET last_war_reminder = NULL WHERE clan_tag = %s", (clan_tag,))
                             get_db_connection().commit()
                         continue
 
-                    # Only proceed to reminders if the state is exactly "inWar"
                     if war_data.state != "inWar": continue
 
-                    # 4. TIME & TRIGGER LOGIC
-                    seconds_left = war_data.end_time.seconds_until
-                    hours_left = seconds_left / 3600
+                    # 5. TIME & TRIGGER LOGIC
+                    hours_left = war_data.end_time.seconds_until / 3600
                     
                     reminder_type = "None"
                     if hours_left <= 1:
@@ -594,12 +598,11 @@ class WarPatrol(commands.Cog):
                     elif hours_left <= 4:
                         reminder_type = "warning"
 
-                    # TRIGGER GATE: Only proceed if we are in a window and haven't sent it yet
                     if reminder_type == "None": continue
                     if (reminder_type == "warning" and last_sent in ["warning", "final"]): continue
                     if (reminder_type == "final" and last_sent == "final"): continue
 
-                    # 5. ATTACK LIMIT & SLACKER IDENTIFICATION
+                    # 6. IDENTIFY SLACKERS
                     max_atks = getattr(war_data, 'attacks_per_member', 0)
                     if max_atks == 0:
                         is_cwl = "League" in str(type(war_data)) or hasattr(war_data, 'war_tag')
@@ -608,46 +611,26 @@ class WarPatrol(commands.Cog):
                         is_cwl = (max_atks == 1)
 
                     source_label = "CWL" if is_cwl else "Standard"
-                    
-                    # Sort and Slice by team_size
                     our_members = sorted(war_data.clan.members, key=lambda x: x.map_position or 99)
                     active_lineup = our_members[:war_data.team_size]
-
-                    # Pass the member's tag from the API, not the server's ID
-                    cursor.execute("SELECT discord_id FROM players WHERE player_tag = %s", (member.tag,))
-                    links = {row[0]: row[1] for row in cursor.fetchall()}
                     
                     unattacked_lines = []
                     for m in active_lineup:
-                        if len(m.attacks) < max_atks:
+                        atks_left = max_atks - len(m.attacks or [])
+                        if atks_left > 0:
+                            # 🔗 Global Lookup (No guild_id needed)
                             d_id = links.get(m.tag)
+                            status_icon = "🔗" if d_id else "❌"
                             
-                            if d_id:
-                                discord_user = self.bot.get_user(int(d_id))
-                                if discord_user:
-                                    # --- THE LOGIC GATE ---
-                                    if reminder_type == "final":
-                                        mention = discord_user.mention # Actual Ping
-                                    else:
-                                        mention = f"**{discord_user.display_name}**" # Clean Name
-                                else:
-                                    # Linked but bot can't see the user
-                                    mention = f"**{m.name[:10]}**"
-                            else:
-                                # Player is not linked at all
-                                mention = f"**{m.name[:10]}**"
-                                
-                            unattacked_lines.append(f"{m.map_position}. {mention} ({max_atks - len(m.attacks or [])} left)")
+                            # Use Bold Names instead of Mentions to prevent pings
+                            unattacked_lines.append(f"{m.map_position}. {status_icon} **{m.name}** ({atks_left} left)")
 
-                    # 6. SEND REMINDER (Only if there are slackers)
+                    # 7. SEND REMINDER
                     if unattacked_lines:
                         channel = self.bot.get_channel(int(war_channel_id)) or await self.bot.fetch_channel(int(war_channel_id))
                         
-                        # Timestamp Bridge Fix
-                        try:
-                            unix_ts = int(war_data.end_time.time.timestamp())
-                        except AttributeError:
-                            unix_ts = int(war_data.end_time.timestamp())
+                        try: unix_ts = int(war_data.end_time.time.timestamp())
+                        except AttributeError: unix_ts = int(war_data.end_time.timestamp())
 
                         time_label = "🚨 FINAL HOUR" if reminder_type == "final" else "⏳ 4 HOURS LEFT"
                         
@@ -663,18 +646,17 @@ class WarPatrol(commands.Cog):
                             color=embed_color
                         )
                         
-                        
                         embed.add_field(name="⚠️ Pending Attacks", value="\n".join(unattacked_lines[:25]), inline=False)
                         embed.add_field(name="Scoreboard", value=f"⭐ `{war_data.clan.stars}` vs ⭐ `{war_data.opponent.stars}`", inline=True)
                         embed.add_field(name="⏳ Ends", value=f"<t:{unix_ts}:R>", inline=True)
-                        embed.set_footer(text=f"Clan Tag: {clan_tag}")
+                        embed.set_footer(text=f"Clan Tag: {clan_tag} | 🔗 = Linked Player")
 
                         await channel.send(embed=embed)
-                        print(f"✅ SUCCESS: Sent {reminder_type} reminder for {clan_tag}")
+                        print(f"✅ SUCCESS: Sent {reminder_type} war reminder for {clan_tag}")
 
-                    # 7. UPDATE DATABASE PERSISTENCE
-                    cursor.execute("UPDATE servers SET last_war_reminder = %s WHERE clan_tag = %s", (reminder_type, clan_tag))
-                    get_db_connection().commit()
+                        # Update DB Persistence
+                        cursor.execute("UPDATE servers SET last_war_reminder = %s WHERE clan_tag = %s", (reminder_type, clan_tag))
+                        get_db_connection().commit()
 
                 except Exception as clan_error:
                     print(f"❌ Error for clan {clan_tag}: {clan_error}")
@@ -682,8 +664,7 @@ class WarPatrol(commands.Cog):
         except Exception as db_e:
             print(f"❌ Database Loop Error: {db_e}")
         finally:
-            if cursor:
-                cursor.close()
+            if cursor: cursor.close()
 
     async def send_war_summary(self, guild_id, channel_id, war, tag):
         channel = self.bot.get_channel(int(channel_id)) or await self.bot.fetch_channel(int(channel_id))
