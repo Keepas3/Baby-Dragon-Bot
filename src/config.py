@@ -39,17 +39,17 @@ async def initialize_coc():
         print(f"❌ CoC Login Failed: {e}")
 
 def connect_db():
-    # Priority 1: Railway TCP Proxy (Public/Stable gateway)
-    # Priority 2: Standard Railway MySQL Variables
-    # Priority 3: Localhost defaults
-    host = os.getenv("RAILWAY_TCP_PROXY_DOMAIN", os.getenv("MYSQLHOST", "localhost"))
+    # Priority 1: Internal Railway Network (Fastest & Most Stable)
+    # Priority 2: Public Proxy (Only if internal fails/local)
+    # Priority 3: Localhost
+    host = os.getenv("MYSQLHOST", os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "localhost"))
+    port = os.getenv("MYSQLPORT", os.getenv("RAILWAY_TCP_PROXY_PORT", "3306"))
+    
     user = os.getenv("MYSQLUSER", "root")
     password = os.getenv("MYSQLPASSWORD")
     database = os.getenv("MYSQLDATABASE")
     
-    port = os.getenv("RAILWAY_TCP_PROXY_PORT", os.getenv("MYSQLPORT", "3306"))
-    
-    print(f"Attempting connection to {host}:{port}...")
+    print(f"Connecting via {'INTERNAL' if os.getenv('MYSQLHOST') else 'PUBLIC'} network to {host}:{port}...")
 
     return mysql.connector.connect(
         host=host, 
@@ -58,7 +58,8 @@ def connect_db():
         database=database, 
         port=int(port), 
         autocommit=True,
-        buffered=True
+        buffered=True,
+        connect_timeout=10 #
     )
 
 db_connection = None

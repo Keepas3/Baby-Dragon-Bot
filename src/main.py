@@ -56,6 +56,7 @@ async def db_heartbeat():
         if cursor:
             # We MUST execute a query to keep the connection alive
             cursor.execute("SELECT 1")
+            cursor.fetchall()
             cursor.close()
             print("💓 DB Heartbeat: Connection is warm.")
     except Exception as e:
@@ -65,14 +66,10 @@ async def db_heartbeat():
 @bot.event
 async def on_ready():
     """Triggered when the bot is officially connected to Discord."""
+    if not db_heartbeat.is_running():
+        db_heartbeat.start()
     try:
         await bot.tree.sync() 
-        
-        # Specific Guild Sync (Instant - Use for testing!)
-        # Replace 123456789 with your test server ID
-        # test_guild = discord.Object(id=123456789)
-        # bot.tree.copy_global_to(guild=test_guild)
-        # await bot.tree.sync(guild=test_guild)
 
         print(f'🚀 Logged in as {bot.user} and commands synced!')
     except Exception as e:
@@ -99,10 +96,12 @@ async def on_guild_remove(guild):
     try:
         cursor = get_db_cursor()
         cursor.execute("DELETE FROM servers WHERE guild_id = %s", (str(guild.id),))
-        cursor.execute("DELETE FROM players WHERE guild_id = %s", (str(guild.id),))
+        
+        print(f"✅ Successfully cleaned up settings for {guild.name}")
+        
+        cursor.close()
     except Exception as e:
         print(f"DB Error on guild remove: {e}")
-
 if __name__ == "__main__":
     # Helps prevent loop errors on local Windows machines
     if sys.platform == 'win32':
