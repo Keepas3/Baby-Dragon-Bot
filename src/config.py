@@ -43,9 +43,9 @@ def connect_db():
     internal_host = os.getenv("MYSQLHOST")
     
     if internal_host:
-        #  we MUST use 3306 as the port for internal connections, even if the env var says otherwise. Railway's internal routing expects this.
+        # Use the internal host for direct connectivity within Railway's network
         host = internal_host
-        port = os.getenv("MYSQLPORT", "3306") 
+        port = "3306" 
         conn_type = "INTERNAL"
     else:
         # 2. Fallback to Public Proxy
@@ -55,6 +55,7 @@ def connect_db():
 
     print(f"Connecting via {conn_type} network to {host}:{port}...")
 
+
     return mysql.connector.connect(
         host=host, 
         user=os.getenv("MYSQLUSER", "root"), 
@@ -62,7 +63,6 @@ def connect_db():
         database=os.getenv("MYSQLDATABASE"), 
         port=int(port), 
         autocommit=True,
-        buffered=True,
         connect_timeout=10
     )
 

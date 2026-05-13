@@ -396,7 +396,7 @@ class RaidPatrol(commands.Cog):
                         if hits_done < 6:
                             # 🔗 Link Status Indicator
                             # We check if the tag exists in our global 'links' dictionary
-                            status_icon = "🔗" if clan_member.tag in links else "❌"
+                            status_icon = "🔗" if clan_member.tag in links else ""
                             
                             # Display as plain text (No <@ID> mention) to prevent pings
                             unattacked_lines.append(f"• {status_icon} **{clan_member.name}** ({hits_done}/6 hits)")
