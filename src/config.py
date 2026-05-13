@@ -2,27 +2,37 @@ import os
 import mysql.connector
 from mysql.connector import pooling
 import coc
+import discord
+from discord.ext import commands
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- Credentials ---
+# --- 1. Discord Credentials & Bot Setup ---
 TOKEN = os.getenv('DISCORD_TOKEN2')
 COC_EMAIL = os.getenv('COC_EMAIL')
 COC_PASSWORD = os.getenv('COC_PASSWORD')
 
-coc_client = None
-db_pool = None  # 🚀 The dispatcher
+intents = discord.Intents.default()
+intents.message_content = True  # Required for prefix commands
+intents.members = True          # Useful for tracking joins/leaves
 
+# This is what main.py is looking for!
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# --- 2. Clash of Clans & DB Global States ---
+coc_client = None
+db_pool = None  
+
+# --- 3. Database Pooling Logic ---
 def init_db_pool():
     """Initializes the connection pool with linked host/port logic."""
     global db_pool
     
-    # 1. Linked Networking Logic
     internal_host = os.getenv("MYSQLHOST")
     if internal_host:
         host = internal_host
-        port = "3306" # Internal networking ALWAYS uses 3306
+        port = "3306" 
         conn_type = "INTERNAL"
     else:
         host = os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "localhost")
@@ -42,8 +52,7 @@ def init_db_pool():
     }
 
     try:
-        # Create a pool of 5 connections. 
-        # If the DB restarts, the pool handles re-establishing connections.
+        # Create a pool of 5 connections.
         db_pool = pooling.MySQLConnectionPool(
             pool_name="dragon_pool",
             pool_size=5,
@@ -61,7 +70,6 @@ def get_db_connection():
     try:
         return db_pool.get_connection()
     except:
-        # If the pool is exhausted or DB is down, try re-initializing
         init_db_pool()
         return db_pool.get_connection()
 
@@ -69,13 +77,12 @@ def get_db_cursor():
     """Returns a buffered cursor from a pooled connection."""
     try:
         conn = get_db_connection()
-        # The pool handles 'ping' logic. We just need the cursor.
         return conn.cursor(buffered=True)
     except Exception as e:
         print(f"⚠️ Cursor Error: {e}")
         return None
 
-# --- CoC Initialization ---
+# --- 4. CoC Initialization ---
 async def initialize_coc():
     global coc_client
     try:
