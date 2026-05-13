@@ -41,7 +41,7 @@ async def setup():
         await initialize_coc() 
         
         # Give it a small heartbeat to ensure the login is registered
-        await asyncio.sleep(2)
+        await asyncio.sleep(10)
         # When 'setup(bot)' runs in your command files, config.coc_client will be ready.
         await load_extensions() 
         

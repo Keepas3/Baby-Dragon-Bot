@@ -100,7 +100,7 @@ def get_db_connection(): # Return the connection itself For Upadting DB
         db_connection = connect_db()
         return db_connection
     
-async def get_safe_cursor(retries=3, delay=3): # For reminders
+async def get_safe_cursor(retries=5, delay=10): # For reminders
     """
     Attempts to connect to the DB multiple times before failing.
     Perfect for handling Railway 'cold starts' or brief network blips.
