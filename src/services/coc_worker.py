@@ -115,7 +115,6 @@ async def run_mission_worker(player_tag: str, cookies_json_str: str):
             # --- TAB 1: BONUSES (After claiming loop) ---
             
             try:
-                # 1. Wait a moment for UI to settle after potential clicks
                 await page.wait_for_timeout(1000)
                 
                 # 2. Get all bonus track items using a partial class match
@@ -128,7 +127,7 @@ async def run_mission_worker(player_tag: str, cookies_json_str: str):
                     
                     # If it doesn't say "Claimed", it's the next reward in line!
                     if "Claimed" not in content:
-                        # Clean up formatting: "70 PTS\nto 100 Gems" -> "70 PTS to 100 Gems"
+                        # "70 PTS to 100 Gems"
                         results["next_reward"] = " ".join(content.split())
                         print(f"DEBUG: Found next reward: {results['next_reward']}")
                         break

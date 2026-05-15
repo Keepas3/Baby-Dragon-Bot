@@ -30,23 +30,19 @@ async def start_health_server():
     await site.start()
     print(f"📡 Health Check pulse started on port {port}")
 
-# --- 🚀 UNIFIED SETUP ---
 async def setup():
     """The main manager that runs before the bot starts."""
     async with bot:
         # 1. Start Clash of Clans connection
         await initialize_coc() 
-        
-        # 2. Start the Health Check server (Crucial for Railway)
+
         await start_health_server()
         
-        # 3. Give services a moment to settle
         await asyncio.sleep(10)
         
-        # 4. Load command extensions (bot_commands.py, etc.)
         await load_extensions() 
         
-        # 5. Connect to Discord
+        
         await bot.start(TOKEN) 
 
 async def load_extensions():
@@ -65,10 +61,9 @@ async def load_extensions():
             except Exception as e:
                 print(f"❌ Failed to load {extension_name}: {e}")
 
-# --- 💓 DATABASE HEARTBEAT ---
-@tasks.loop(minutes=9)
+@tasks.loop(minutes=5)
 async def db_heartbeat():
-    """Keeps the Railway MySQL instance warm every 9 mins."""
+    """Keeps the Railway MySQL instance warm every 5 mins."""
     try:
         cursor = get_db_cursor()
         if cursor:
